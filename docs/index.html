@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agent CLI — The Missing AI Package for Developers</title>
+    <style>
+        :root {
+            --bg-color: #0d1117;
+            --card-bg: #161b22;
+            --border-color: #30363d;
+            --text-main: #c9d1d9;
+            --accent-green: #2ea043;
+            --accent-yellow: #f2e05a;
+            --code-bg: #010409;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        header {
+            text-align: center;
+            margin-top: 4rem;
+            margin-bottom: 2rem;
+            max-width: 750px;
+            padding: 0 1rem;
+        }
+
+        h1 {
+            font-size: 3rem;
+            font-weight: 800;
+            color: #ffffff;
+            margin-bottom: 0.5rem;
+        }
+
+        p.subtitle {
+            font-size: 1.25rem;
+            color: #8b949e;
+            line-height: 1.5;
+        }
+
+        .terminal-box {
+            background-color: var(--code-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 1.2rem 1.5rem;
+            width: 90%;
+            max-width: 680px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            margin-bottom: 3rem;
+        }
+
+        .terminal-header {
+            display: flex;
+            gap: 6px;
+            margin-bottom: 12px;
+        }
+
+        .dot { width: 12px; height: 12px; border-radius: 50%; }
+        .red { background: #ff5f56; }
+        .yellow { background: #ffbd2e; }
+        .green { background: #27c93f; }
+
+        .command-title {
+            color: #8b949e;
+            font-size: 0.85rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        code {
+            font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+            color: var(--accent-yellow);
+            font-size: 0.95rem;
+            word-break: break-all;
+        }
+
+        .features {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 1.5rem;
+            max-width: 900px;
+            width: 90%;
+            margin-bottom: 4rem;
+        }
+
+        .feature-card {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 1.5rem;
+        }
+
+        .feature-card h3 {
+            color: #fff;
+            margin-top: 0;
+        }
+
+        footer {
+            color: #8b949e;
+            font-size: 0.85rem;
+            margin-bottom: 3rem;
+        }
+
+        footer a { color: var(--accent-green); text-decoration: none; }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>🤖 agent-cli</h1>
+        <p class="subtitle">The modular, local AI coding agent ecosystem for developers.</p>
+    </header>
+
+    <!-- Linux/macOS Box -->
+    <div class="terminal-box">
+        <div class="terminal-header">
+            <div class="dot red"></div>
+            <div class="dot yellow"></div>
+            <div class="dot green"></div>
+        </div>
+        <div class="command-title">Install on Linux / macOS</div>
+        <code>curl -fsSL https://raw.githubusercontent.com/CodeCentury22/agent-cli/main/install.sh | bash</code>
+    </div>
+
+    <!-- Windows Box -->
+    <div class="terminal-box" style="margin-top: -1.5rem;">
+        <div class="terminal-header">
+            <div class="dot red"></div>
+            <div class="dot yellow"></div>
+            <div class="dot green"></div>
+        </div>
+        <div class="command-title">Install on Windows (PowerShell)</div>
+        <code>irm https://raw.githubusercontent.com/CodeCentury22/agent-cli/main/install.ps1 | iex</code>
+    </div>
+
+    <div class="features">
+        <div class="feature-card">
+            <h3>⚡ Zero-Argument REPL</h3>
+            <p>Run <code>agent-cli</code> anywhere in your workspace to launch an interactive session instantly.</p>
+        </div>
+        <div class="feature-card">
+            <h3>🌐 Multi-LLM Gateway</h3>
+            <p>Switch seamlessly between local Ollama models and cloud providers like Claude, Gemini, and OpenRouter.</p>
+        </div>
+        <div class="feature-card">
+            <h3>🧠 Semantic Workspace Memory</h3>
+            <p>Indexes your local codebase into ChromaDB using AST extraction and code chunking.</p>
+        </div>
+    </div>
+
+    <footer>
+        Built with MIT License © 2026 CodeCentury22 · <a href="https://github.com/CodeCentury22/agent-cli">GitHub Repository</a>
+    </footer>
+
+</body>
+</html>
