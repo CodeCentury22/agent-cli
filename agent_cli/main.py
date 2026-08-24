@@ -10,6 +10,15 @@ from agent_llm_client import create_llm_client, BaseLLMClient
 from agent_vector_memory import VectorStoreManager
 from .auth import get_stored_credentials, save_credentials, start_browser_oauth_flow
 
+from agent_file_tools import FILE_TOOLS_SCHEMA, TOOL_DISPATCHER
+from agent_async_runner import SHELL_TOOLS_SCHEMA, ASYNC_TOOL_DISPATCHER
+
+# Combine all tool schemas for Ollama / Gemini
+ALL_TOOLS_SCHEMA = FILE_TOOLS_SCHEMA + SHELL_TOOLS_SCHEMA
+
+# Combine all dispatchers
+ALL_TOOL_DISPATCHERS = {**TOOL_DISPATCHER, **ASYNC_TOOL_DISPATCHER}
+
 console = Console()
 
 PROVIDERS = {
