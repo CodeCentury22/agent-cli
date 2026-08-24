@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agent-cli"
-version = "0.2.0"
+version = "0.3.0"
 description = "Unified local AI agent CLI."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -14,19 +14,20 @@ dependencies = [
     "agent-vector-memory",
     "agent-file-tools",
     "agent-async-runner",
-    "agent-llm-client"
+    "agent-llm-client",
+    "agent-core-utils"
 ]
 
 [project.scripts]
 agent-cli = "agent_cli.main:main"
 
 [tool.uv.sources]
-agent-core-utils = { git = "https://github.com/CodeCentury22/agent-core-utils.git", tag = "v0.1.0" }
-agent-guardrails = { git = "https://github.com/CodeCentury22/agent-guardrails.git", tag = "v0.1.0" }
-agent-vector-memory = { git = "https://github.com/CodeCentury22/agent-vector-memory.git", tag = "v0.2.0" }
-agent-async-runner = { git = "https://github.com/CodeCentury22/agent-async-runner.git", tag = "v0.1.0" }
-agent-file-tools = { git = "https://github.com/CodeCentury22/agent-file-tools.git", tag = "v0.3.0" }
-agent-llm-client = { git = "https://github.com/CodeCentury22/agent-llm-client.git", tag = "v0.2.0" }
+agent-core-utils    = { git = "https://github.com/CodeCentury22/agent-core-utils.git", tag = "v0.2.0" }
+agent-guardrails    = { git = "https://github.com/CodeCentury22/agent-guardrails.git", tag = "v0.2.0" }
+agent-async-runner  = { git = "https://github.com/CodeCentury22/agent-async-runner.git", tag = "v0.2.0" }
+agent-llm-client    = { git = "https://github.com/CodeCentury22/agent-llm-client.git", tag = "v0.3.0" }
+agent-vector-memory = { git = "https://github.com/CodeCentury22/agent-vector-memory.git", tag = "v0.3.0" }
+agent-file-tools    = { git = "https://github.com/CodeCentury22/agent-file-tools.git", tag = "v0.4.0" }
 
 [dependency-groups]
 dev = [
