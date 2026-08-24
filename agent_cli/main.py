@@ -12,6 +12,8 @@ from .auth import get_stored_credentials, save_credentials, start_browser_oauth_
 
 from agent_file_tools import FILE_TOOLS_SCHEMA, TOOL_DISPATCHER
 from agent_async_runner import SHELL_TOOLS_SCHEMA, ASYNC_TOOL_DISPATCHER
+from agent_guardrails import validate_tool_args
+
 
 # Combine all tool schemas for Ollama / Gemini
 ALL_TOOLS_SCHEMA = FILE_TOOLS_SCHEMA + SHELL_TOOLS_SCHEMA
@@ -43,6 +45,26 @@ PROVIDERS = {
         "models": ["deepseek/deepseek-r1", "anthropic/claude-3.5-sonnet", "meta-llama/llama-3.3-70b-instruct"]
     }
 }
+
+async def handle_tool_call(tool_name: str, raw_args: dict):
+    """Sanitizes arguments via guardrails and executes the target tool dispatcher."""
+    # 1. Parameter Guardrail Validation & Path Normalization
+    is_valid, sanitized_args, error_msg = validate_tool_args(tool_name, raw_args)
+    
+    if not is_valid:
+        print(f"❌ [Guardrail Reject]: {error_msg}")
+        return {"status": "ERROR", "error": error_msg}
+
+    # 2. Dispatch Tool Call
+    dispatcher = ALL_TOOL_DISPATCHERS.get(tool_name)
+    if not dispatcher:
+        return {"status": "ERROR", "error": f"Tool '{tool_name}' not registered."}
+
+    # 3. Handle Async vs Sync execution transparently
+    if asyncio.iscoroutinefunction(dispatcher):
+        return await dispatcher(**sanitized_args)
+    else:
+        return dispatcher(**sanitized_args)
 
 def setup_provider_and_auth() -> Tuple[str, str, str | None]:
     """Interactive wizard for provider selection, model choice, and auth key handling."""
@@ -87,7 +109,7 @@ def setup_provider_and_auth() -> Tuple[str, str, str | None]:
                 save_credentials(selected_provider, api_key)
     return selected_provider, selected_model, api_key
 
-def main():
+async def async_main():
     try:
         provider, model, api_key = setup_provider_and_auth()
     except (KeyboardInterrupt, EOFError):
@@ -133,12 +155,51 @@ def main():
                 {"role": "user", "content": f"Context:\n{context_str}\n\nTask: {user_input}"}
             ]
 
-            response, metrics = asyncio.run(llm_client.chat(messages))
-            console.print(f"\n🤖 [bold cyan]Agent Response:[/bold cyan]\n{response}")
+            # 1. Pass ALL_TOOLS_SCHEMA into the LLM chat call
+            response_obj, metrics = await llm_client.chat(messages, tools=ALL_TOOLS_SCHEMA)
+
+            # 2. Check if the LLM returned tool calls to execute
+            # 2. Check if the LLM returned tool calls to execute
+            if hasattr(response_obj, "tool_calls") and response_obj.tool_calls:
+                for tool_call in response_obj.tool_calls:
+                    tool_name = tool_call["name"]
+                    raw_args = tool_call["arguments"]
+                    tool_call_id = tool_call.get("id", "call_default")
+
+                    console.print(f"\n🛠️  [bold yellow]Agent Invoking Tool:[/bold yellow] [cyan]{tool_name}[/cyan]")
+                    
+                    # 3. Route through guardrails, HITL, and dispatchers
+                    tool_result = await handle_tool_call(tool_name, raw_args)
+                    console.print(f"📋 [bold green]Tool Execution Result:[/bold green]\n{tool_result}")
+
+                    # Append message history with matching tool_call_id
+                    messages.append({
+                        "role": "assistant",
+                        "content": None,
+                        "tool_calls": [tool_call]
+                    })
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call_id,
+                        "name": tool_name,
+                        "content": str(tool_result)
+                    })
+                
+                # Re-query the model with tool execution feedback so it can generate its final answer
+                final_response, _ = await llm_client.chat(messages)
+                console.print(f"\n🤖 [bold cyan]Agent Response:[/bold cyan]\n{final_response}")
+            else:
+                # Direct text response (no tool execution requested)
+                console.print(f"\n🤖 [bold cyan]Agent Response:[/bold cyan]\n{response_obj}")
+            
             console.print(f"\n[dim]Metrics: {metrics}[/dim]")
+
         except (KeyboardInterrupt, EOFError):
             console.print("\n[yellow]Session interrupted. Goodbye![/yellow]")
             break
+
+def main():
+    asyncio.run(async_main())
 
 if __name__ == "__main__":
     main()
