@@ -10,6 +10,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 
 dependencies = [
+    "rich>=13.0.0",
     "agent-guardrails",
     "agent-vector-memory",
     "agent-file-tools",
