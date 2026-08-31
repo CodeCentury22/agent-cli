@@ -1,5 +1,6 @@
 import os
 import sys
+import json
 import asyncio
 from rich.console import Console
 from rich.panel import Panel
@@ -16,7 +17,7 @@ from agent_async_runner import SHELL_TOOLS_SCHEMA, ASYNC_TOOL_DISPATCHER
 from agent_guardrails import validate_tool_args
 
 
-# Combine all tool schemas for Ollama / Gemini
+# Combine all tool schemas for Ollama / Gemini / Claude / OpenRouter
 ALL_TOOLS_SCHEMA = FILE_TOOLS_SCHEMA + SHELL_TOOLS_SCHEMA
 
 # Combine all dispatchers
@@ -97,7 +98,7 @@ def setup_provider_and_auth() -> Tuple[str, str, str | None]:
     """Interactive wizard for provider selection, model choice, and auth key handling."""
     console.print(Panel("[bold cyan]🤖 Agent CLI - Interactive Workspace Session[/bold cyan]", expand=False))
 
-    console.print("\n[bold yellow]Select LLM Provider:[/bold yellow]")  # Fixed markup typo
+    console.print("\n[bold yellow]Select LLM Provider:[/bold yellow]")
     for key, info in PROVIDERS.items():
         console.print(f"    [bold green]{key})[/bold green] {info['label']}")
 
@@ -185,44 +186,52 @@ async def async_main():
                 {"role": "user", "content": f"Context:\n{context_str}\n\nTask: {user_input}"}
             ]
 
-            # 1. Pass ALL_TOOLS_SCHEMA into the LLM chat call
-            response_obj, metrics = await llm_client.chat(messages, tools=ALL_TOOLS_SCHEMA)
+            # Multi-turn tool execution loop
+            while True:
+                response_obj, metrics = await llm_client.chat(messages, tools=ALL_TOOLS_SCHEMA)
 
-            # 2. Check if the LLM returned tool calls to execute
-            # 2. Check if the LLM returned tool calls to execute
-            if hasattr(response_obj, "tool_calls") and response_obj.tool_calls:
-                for tool_call in response_obj.tool_calls:
-                    tool_name = tool_call["name"]
-                    raw_args = tool_call["arguments"]
-                    tool_call_id = tool_call.get("id", "call_default")
+                tool_name = None
+                raw_args = {}
 
+                # 1. Check object attribute format (SDK models)
+                if hasattr(response_obj, "tool_calls") and response_obj.tool_calls:
+                    call = response_obj.tool_calls[0]
+                    tool_name = call.get("name")
+                    raw_args = call.get("arguments", {})
+                
+                # 2. Check raw JSON string format (Ollama / JSON-formatted providers)
+                elif isinstance(response_obj, str):
+                    try:
+                        parsed = json.loads(response_obj)
+                        if isinstance(parsed, dict):
+                            # Handle {"name": "...", "arguments": {...}} or {"tool_name": "...", "arguments": {...}}
+                            tool_name = parsed.get("name") or parsed.get("tool_name")
+                            raw_args = parsed.get("arguments", {})
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+
+                # If a valid tool execution was requested:
+                if tool_name and tool_name in ALL_TOOL_DISPATCHERS:
                     console.print(f"\n🛠️  [bold yellow]Agent Invoking Tool:[/bold yellow] [cyan]{tool_name}[/cyan]")
                     
-                    # 3. Route through guardrails, HITL, and dispatchers
                     tool_result = await handle_tool_call(tool_name, raw_args)
                     console.print(f"📋 [bold green]Tool Execution Result:[/bold green]\n{tool_result}")
 
-                    # Append message history with matching tool_call_id
+                    # Append tool invocation and output to context history
+                    messages.append({"role": "assistant", "content": response_obj})
                     messages.append({
-                        "role": "assistant",
-                        "content": None,
-                        "tool_calls": [tool_call]
+                        "role": "user",
+                        "content": f"Tool '{tool_name}' Output:\n{tool_result}\n\nContinue with task or call next tool."
                     })
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tool_call_id,
-                        "name": tool_name,
-                        "content": str(tool_result)
-                    })
-                
-                # Re-query the model with tool execution feedback so it can generate its final answer
-                final_response, _ = await llm_client.chat(messages)
-                console.print(f"\n🤖 [bold cyan]Agent Response:[/bold cyan]\n{final_response}")
-            else:
-                # Direct text response (no tool execution requested)
+
+                    console.print(f"[dim]Metrics: {metrics}[/dim]")
+                    # Loop again to pass the tool output back to the model
+                    continue
+
+                # Final response reached (no further tool calls requested)
                 console.print(f"\n🤖 [bold cyan]Agent Response:[/bold cyan]\n{response_obj}")
-            
-            console.print(f"\n[dim]Metrics: {metrics}[/dim]")
+                console.print(f"\n[dim]Metrics: {metrics}[/dim]")
+                break
 
         except (KeyboardInterrupt, EOFError):
             console.print("\n[yellow]Session interrupted. Goodbye![/yellow]")
