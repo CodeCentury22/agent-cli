@@ -7,7 +7,7 @@ from rich.prompt import Prompt
 from typing import Tuple
 from .diff_viewer import render_file_diff
 
-from agent_llm_client import create_llm_client, BaseLLMClient
+from agent_llm_client import create_llm_client, BaseLLMClient, OllamaClient
 from agent_vector_memory import VectorStoreManager
 from .auth import get_stored_credentials, save_credentials, start_browser_oauth_flow
 
@@ -28,7 +28,13 @@ PROVIDERS = {
     "1": {
         "name": "ollama",
         "label": "Local (Ollama)",
-        "models": ["qwen2.5-coder:7b-instruct", "llama3.3:70b", "deepseek-r1:70b"]
+        "models": [
+            "qwen2.5-coder:7b-instruct",
+            "qwen2.5-coder:32b-instruct",
+            "deepseek-r1:32b",
+            "llama3.3:70b",
+            "deepseek-r1:70b"
+        ]
     },
     "2": {
         "name": "gemini",
@@ -36,14 +42,18 @@ PROVIDERS = {
         "models": ["gemini-1.5-pro", "gemini-1.5-flash"]
     },
     "3": {
-        "name": "claude",  # Fixed lowercased provider key
+        "name": "claude",
         "label": "Anthropic Claude",
         "models": ["claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022"]
     },
     "4": {
         "name": "openrouter",
         "label": "OpenRouter / OpenCode Gateway",
-        "models": ["deepseek/deepseek-r1", "anthropic/claude-3.5-sonnet", "meta-llama/llama-3.3-70b-instruct"]
+        "models": [
+            "deepseek/deepseek-r1",
+            "anthropic/claude-3.5-sonnet",
+            "meta-llama/llama-3.3-70b-instruct"
+        ]
     }
 }
 
@@ -141,6 +151,9 @@ async def async_main():
             model=model,
             api_key=api_key
         )
+        if isinstance(llm_client, OllamaClient):
+            if not await llm_client.ensure_model_available():
+                sys.exit(1)
         vector_store = VectorStoreManager(llm_client=llm_client)
     except Exception as e:
         console.print(f"[bold red]Initialization Error:[/bold red] {e}")
