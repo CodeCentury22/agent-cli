@@ -61,14 +61,12 @@ PROVIDERS = {
 
 async def handle_tool_call(tool_name: str, raw_args: dict):
     """Sanitizes arguments via guardrails, displays diffs for file edits, and dispatches tools."""
-    # 1. Parameter Guardrail Validation & Path Normalization
     is_valid, sanitized_args, error_msg = validate_tool_args(tool_name, raw_args)
     
     if not is_valid:
         console.print(f"❌ [Guardrail Reject]: {error_msg}")
         return {"status": "ERROR", "error": error_msg}
 
-    # 2. Render Cline-style Diff Preview for file writes
     if tool_name == "write_file":
         target_path = sanitized_args.get("file_path")
         new_code = sanitized_args.get("code_body", "")
@@ -83,16 +81,17 @@ async def handle_tool_call(tool_name: str, raw_args: dict):
 
         render_file_diff(target_path, old_code, new_code)
 
-    # 3. Dispatch Tool Call
     dispatcher = ALL_TOOL_DISPATCHERS.get(tool_name)
     if not dispatcher:
         return {"status": "ERROR", "error": f"Tool '{tool_name}' not registered."}
 
-    # 4. Handle Async vs Sync execution transparently
-    if asyncio.iscoroutinefunction(dispatcher):
-        return await dispatcher(**sanitized_args)
-    else:
-        return dispatcher(**sanitized_args)
+    # Execute dispatcher and inspect result for coroutines
+    result = dispatcher(**sanitized_args)
+    if asyncio.iscoroutine(result):
+        result = await result
+
+    return result
+
 
 def setup_provider_and_auth() -> Tuple[str, str, str | None]:
     """Interactive wizard for provider selection, model choice, and auth key handling."""
