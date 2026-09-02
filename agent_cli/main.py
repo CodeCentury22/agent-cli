@@ -71,6 +71,33 @@ AGENT_IGNORES = [
     "agent_manifest.json"
 ]
 
+import glob
+
+def load_project_skills() -> str:
+    """Scans for skill Markdown files in .agent/skills/ or skills/ and merges them into context."""
+    skill_paths = glob.glob(".agent/skills/*.md") + glob.glob("skills/*.md") + glob.glob(".skills/*.md")
+    
+    if not skill_paths:
+        return ""
+
+    skills_text = "\n\nPROJECT SKILLS & DOMAIN GUIDELINES:\n"
+    loaded_count = 0
+
+    for path in skill_paths:
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                content = f.read().strip()
+                skills_text += f"\n--- SKILL: {os.path.basename(path)} ---\n{content}\n"
+                loaded_count += 1
+        except Exception:
+            pass
+
+    if loaded_count > 0:
+        console.print(f"🧠 [Skill Loader]: Injected [bold green]{loaded_count}[/bold green] skill guide(s) into model memory.")
+        return skills_text
+
+    return ""
+
 def ensure_agent_gitignore_entries():
     """Ensures agent runtime files are in .gitignore and commits changes if updated."""
     # Skip if not inside a git repository
@@ -233,14 +260,16 @@ async def async_main():
                 
             context_matches = vector_store.search_codebase(user_input, top_k=2)
             context_str = "\n".join([f"File: {m['file_path']}\nContent: {m['content']}" for m in context_matches])
-
+            skills_context = load_project_skills()
             system_prompt = (
                 "You are an autonomous software engineering agent operating in a CLI workspace.\n\n"
-                "RULES:\n"
-                "1. Always inspect configuration files (e.g., `package.json`) before guessing build/run scripts.\n"
-                "2. When asking to read, write, or run commands, output valid tool call requests JSON formatted as:\n"
+                "OPERATIONAL RULES:\n"
+                "1. Always inspect configuration files (e.g., `package.json`, build configs) before executing shell commands.\n"
+                "2. When calling tools, output valid JSON strictly matching the schema:\n"
                 '   {"name": "tool_name", "arguments": {"arg": "value"}}\n'
-                "3. If a tool command fails, DO NOT repeat identical parameters. Read the error, inspect files, or adjust flags."
+                "3. If a tool command or build fails, DO NOT repeat identical arguments. Read error output, inspect files, or adjust flags.\n"
+                "4. Adhere strictly to project-specific skills and domain guidelines if they areprovided below.\n"
+                f"{skills_context}"
             )
 
             messages = [
