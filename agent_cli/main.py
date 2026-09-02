@@ -1,5 +1,6 @@
 import os
 import sys
+import subprocess
 import json
 import asyncio
 from rich.console import Console
@@ -57,6 +58,58 @@ PROVIDERS = {
         ]
     }
 }
+
+AGENT_IGNORES = [
+    ".chroma/",
+    ".chromadb/",
+    "*.jsonl",
+    "agent_traces.jsonl",
+    "file_tools_telemetry.jsonl",
+    "async_telemetry.jsonl",
+    "ollama_debug.log",
+    ".codebase_summary.xml",
+    "agent_manifest.json"
+]
+
+def ensure_agent_gitignore_entries():
+    """Ensures agent runtime files are in .gitignore and commits changes if updated."""
+    # Skip if not inside a git repository
+    if not os.path.exists(os.path.join(os.getcwd(), ".git")):
+        return
+
+    gitignore_path = os.path.join(os.getcwd(), ".gitignore")
+    
+    existing_lines = set()
+    if os.path.exists(gitignore_path):
+        try:
+            with open(gitignore_path, "r", encoding="utf-8") as f:
+                existing_lines = {line.strip() for line in f.readlines()}
+        except Exception:
+            pass
+
+    to_add = [entry for entry in AGENT_IGNORES if entry not in existing_lines]
+
+    if to_add:
+        try:
+            with open(gitignore_path, "a", encoding="utf-8") as f:
+                f.write("\n\n# Agent CLI auto-generated artifacts\n")
+                for entry in to_add:
+                    f.write(f"{entry}\n")
+            console.print("🛡️  [Git Guard]: Updated [bold].gitignore[/bold] with agent artifact patterns.")
+
+            # Stage and commit the .gitignore update
+            subprocess.run(["git", "add", ".gitignore"], check=True, capture_output=True)
+            subprocess.run(
+                ["git", "commit", "-m", "chore: auto-add agent runtime artifacts to .gitignore"],
+                check=True,
+                capture_output=True
+            )
+            console.print("📦 [Git Guard]: Automatically committed .gitignore updates.")
+        except subprocess.CalledProcessError:
+            # Handle cases where git user details aren't set or no changes to commit
+            pass
+        except Exception as e:
+            console.print(f"[yellow]Warning: Could not update/commit .gitignore: {e}[/yellow]")
 
 
 async def handle_tool_call(tool_name: str, raw_args: dict):
@@ -138,6 +191,7 @@ def setup_provider_and_auth() -> Tuple[str, str, str | None]:
 
 async def async_main():
     try:
+        ensure_agent_gitignore_entries()
         provider, model, api_key = setup_provider_and_auth()
     except (KeyboardInterrupt, EOFError):
         console.print("\n[yellow]Session canceled.[/yellow]")
@@ -180,13 +234,28 @@ async def async_main():
             context_matches = vector_store.search_codebase(user_input, top_k=2)
             context_str = "\n".join([f"File: {m['file_path']}\nContent: {m['content']}" for m in context_matches])
 
+            system_prompt = (
+                "You are an autonomous software engineering agent operating in a CLI workspace.\n\n"
+                "RULES:\n"
+                "1. Always inspect configuration files (e.g., `package.json`) before guessing build/run scripts.\n"
+                "2. When asking to read, write, or run commands, output valid tool call requests JSON formatted as:\n"
+                '   {"name": "tool_name", "arguments": {"arg": "value"}}\n'
+                "3. If a tool command fails, DO NOT repeat identical parameters. Read the error, inspect files, or adjust flags."
+            )
+
             messages = [
-                {"role": "system", "content": "You are a software engineering assistant operating in a workspace CLI."},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": f"Context:\n{context_str}\n\nTask: {user_input}"}
             ]
 
+            last_tool_signature = None
+
             # Multi-turn tool execution loop
             while True:
+                # Prune old context messages to avoid token bloat during deep turns
+                if len(messages) > 12:
+                    messages = [messages[0], messages[1]] + messages[-8:]
+
                 response_obj, metrics = await llm_client.chat(messages, tools=ALL_TOOLS_SCHEMA)
 
                 tool_name = None
@@ -203,7 +272,6 @@ async def async_main():
                     try:
                         parsed = json.loads(response_obj)
                         if isinstance(parsed, dict):
-                            # Handle {"name": "...", "arguments": {...}} or {"tool_name": "...", "arguments": {...}}
                             tool_name = parsed.get("name") or parsed.get("tool_name")
                             raw_args = parsed.get("arguments", {})
                     except (json.JSONDecodeError, TypeError):
@@ -211,13 +279,27 @@ async def async_main():
 
                 # If a valid tool execution was requested:
                 if tool_name and tool_name in ALL_TOOL_DISPATCHERS:
+                    tool_signature = (tool_name, json.dumps(raw_args, sort_keys=True))
+                    
+                    # Circuit breaker: catch repeated identical calls
+                    if tool_signature == last_tool_signature:
+                        console.print(f"\n🛑 [Circuit Breaker]: Detected duplicate call to '{tool_name}'. Halting turn.")
+                        messages.append({
+                            "role": "user",
+                            "content": f"System Warning: Do not repeat failed command '{tool_name}' with identical arguments."
+                        })
+                        last_tool_signature = None
+                        break
+
+                    last_tool_signature = tool_signature
+
                     console.print(f"\n🛠️  [bold yellow]Agent Invoking Tool:[/bold yellow] [cyan]{tool_name}[/cyan]")
                     
                     tool_result = await handle_tool_call(tool_name, raw_args)
                     console.print(f"📋 [bold green]Tool Execution Result:[/bold green]\n{tool_result}")
 
                     # Append tool invocation and output to context history
-                    messages.append({"role": "assistant", "content": response_obj})
+                    messages.append({"role": "assistant", "content": json.dumps({"name": tool_name, "arguments": raw_args})})
                     messages.append({
                         "role": "user",
                         "content": f"Tool '{tool_name}' Output:\n{tool_result}\n\nContinue with task or call next tool."
