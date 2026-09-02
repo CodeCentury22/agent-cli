@@ -2,6 +2,7 @@ import os
 import sys
 import subprocess
 import json
+import glob
 import asyncio
 from rich.console import Console
 from rich.panel import Panel
@@ -71,7 +72,6 @@ AGENT_IGNORES = [
     "agent_manifest.json"
 ]
 
-import glob
 
 def load_project_skills() -> str:
     """Scans for skill Markdown files in .agent/skills/ or skills/ and merges them into context."""
@@ -105,24 +105,40 @@ def ensure_agent_gitignore_entries():
         return
 
     gitignore_path = os.path.join(os.getcwd(), ".gitignore")
+    header_marker = "# Agent CLI auto-generated artifacts"
     
+    existing_content = ""
     existing_lines = set()
+
     if os.path.exists(gitignore_path):
         try:
             with open(gitignore_path, "r", encoding="utf-8") as f:
-                existing_lines = {line.strip() for line in f.readlines()}
+                existing_content = f.read()
+                existing_lines = {line.strip() for line in existing_content.splitlines()}
         except Exception:
             pass
+
+    # Quick check: If header marker is already present and all items exist, exit early
+    if header_marker in existing_content:
+        missing_entries = [entry for entry in AGENT_IGNORES if entry not in existing_lines]
+        if not missing_entries:
+            return  # Clean exit, nothing to append or commit
 
     to_add = [entry for entry in AGENT_IGNORES if entry not in existing_lines]
 
     if to_add:
         try:
             with open(gitignore_path, "a", encoding="utf-8") as f:
-                f.write("\n\n# Agent CLI auto-generated artifacts\n")
+                # Write header marker only if not present yet
+                if header_marker not in existing_content:
+                    f.write(f"\n\n{header_marker}\n")
+                else:
+                    f.write("\n")
+                
                 for entry in to_add:
                     f.write(f"{entry}\n")
-            console.print("🛡️  [Git Guard]: Updated [bold].gitignore[/bold] with agent artifact patterns.")
+            
+            console.print("🛡️  [Git Guard]: Updated [bold].gitignore[/bold] with missing agent artifact patterns.")
 
             # Stage and commit the .gitignore update
             subprocess.run(["git", "add", ".gitignore"], check=True, capture_output=True)
@@ -133,7 +149,7 @@ def ensure_agent_gitignore_entries():
             )
             console.print("📦 [Git Guard]: Automatically committed .gitignore updates.")
         except subprocess.CalledProcessError:
-            # Handle cases where git user details aren't set or no changes to commit
+            # Handle cases where git working tree has no changes to commit
             pass
         except Exception as e:
             console.print(f"[yellow]Warning: Could not update/commit .gitignore: {e}[/yellow]")
