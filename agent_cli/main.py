@@ -1,6 +1,7 @@
 import os
 import sys
 import asyncio
+import importlib.metadata
 from rich.console import Console
 from rich.panel import Panel
 from rich.prompt import Prompt
@@ -11,12 +12,32 @@ from agent_vector_memory import VectorStoreManager
 from .agent_workspace import ensure_agent_gitignore_entries
 from .agent_config import setup_provider_and_auth
 from .agent_orchestrator import run_agent_turn
+from .skill_downloader import ensure_preset_skills_exist
 
 console = Console()
 
+try:
+    VERSION = f"v{importlib.metadata.version('agent-cli')}"
+except importlib.metadata.PackageNotFoundError:
+    VERSION = "v0.6.1"
+
+def display_welcome_banner():
+    console.print(
+        Panel(
+            f"🤖 [bold cyan]Agent CLI[/bold cyan] [dim]({VERSION})[/dim] - Interactive Workspace Session",
+            expand=False,
+            border_style="cyan"
+        )
+    )
+
 async def async_main():
+    display_welcome_banner()
+    
+    # Ensure gitignore rules and workspace preset skills exist
+    ensure_agent_gitignore_entries()
+    ensure_preset_skills_exist()
+
     try:
-        ensure_agent_gitignore_entries()
         provider, model, api_key = setup_provider_and_auth()
     except (KeyboardInterrupt, EOFError):
         console.print("\n[yellow]Session canceled.[/yellow]")
