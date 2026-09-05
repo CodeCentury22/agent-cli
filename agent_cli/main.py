@@ -56,7 +56,16 @@ async def async_main():
         if isinstance(llm_client, OllamaClient):
             if not await llm_client.ensure_model_available():
                 sys.exit(1)
+        
         vector_store = VectorStoreManager(llm_client=llm_client)
+        
+        # Index workspace files into vector memory
+        with console.status("[bold cyan]Indexing workspace into vector memory...[/bold cyan]"):
+            if asyncio.iscoroutinefunction(getattr(vector_store, "index_workspace", None)):
+                await vector_store.index_workspace()
+            else:
+                vector_store.index_workspace()
+                
     except Exception as e:
         console.print(f"[bold red]Initialization Error:[/bold red] {e}")
         sys.exit(1)
