@@ -4,7 +4,9 @@ import asyncio
 import importlib.metadata
 from rich.console import Console
 from rich.panel import Panel
-from rich.prompt import Prompt
+from prompt_toolkit import prompt
+from prompt_toolkit.styles import Style
+from prompt_toolkit.formatted_text import HTML
 
 from agent_llm_client import create_llm_client, BaseLLMClient, OllamaClient
 from agent_vector_memory import VectorStoreManager
@@ -68,9 +70,17 @@ async def async_main():
         title="Agent Environment"
     ))
 
+    # Configure prompt_toolkit styling
+    prompt_style = Style.from_dict({
+        'prompt': 'ansigreen bold',
+    })
+
     while True:
         try:
-            user_input = Prompt.ask("\n[bold green]agent>[/bold green]").strip()
+            # Using HTML formatting compatible with prompt_toolkit
+            console.print()  # Add newline before prompt
+            user_input = prompt(HTML('<prompt>agent&gt; </prompt>'), style=prompt_style).strip()
+            
             if not user_input:
                 continue
             if user_input.lower() in ["exit", "quit"]:

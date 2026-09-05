@@ -16,7 +16,8 @@ dependencies = [
     "agent-file-tools",
     "agent-async-runner",
     "agent-llm-client",
-    "agent-core-utils"
+    "agent-core-utils",
+    "prompt-toolkit>=3.0.53",
 ]
 
 [project.scripts]

@@ -65,34 +65,32 @@ def test_ensure_preset_skills_exist_bypasses_if_sentinel_exists(tmp_path):
         mock_httpx.assert_not_called()
 
 
-def test_ensure_preset_skills_exist_downloads_and_writes_sentinel(tmp_path):
-    """Verify that preset skills are cloned/downloaded and sentinel file is written on first run."""
-    with patch("os.getcwd", return_value=str(tmp_path)), \
-         patch("subprocess.run") as mock_git, \
-         patch("httpx.Client") as mock_httpx:
+def test_ensure_preset_skills_exist_downloads_and_writes_sentinel(tmp_path, monkeypatch):
+    # Temporarily switch the working directory to the pytest tmp_path
+    monkeypatch.chdir(tmp_path)
 
-        # Mock HTTP response for single-file skills
+    # Mock stack detection to return at least one platform (e.g. ['python'])
+    with patch("agent_cli.skill_downloader.detect_project_platforms", return_value=["python"]), \
+         patch("httpx.Client.get") as mock_get:
+        
+        # Mock successful HTTP 200 response for preset skill fetch
         mock_response = MagicMock()
         mock_response.status_code = 200
-        mock_response.text = "# Sample Skill Content"
-        mock_httpx.return_value.__enter__.return_value.get.return_value = mock_response
+        mock_response.text = "# Python Skill Guidelines"
+        mock_get.return_value = mock_response
 
+        # Execute target function
         ensure_preset_skills_exist()
 
-        skills_dir = tmp_path / ".agent" / "skills"
-        sentinel = skills_dir / ".preset_installed"
+    # Assertions on local tmp_path directory structure
+    skills_dir = tmp_path / ".agent" / "skills"
+    sentinel = skills_dir / ".preset_installed"
+    python_skill = skills_dir / "python.md"
 
-        # Check sentinel created
-        assert sentinel.exists()
-
-        # Check Git clone executed for Angular
-        mock_git.assert_called_once()
-        assert "https://github.com/angular/skills.git" in mock_git.call_args[0][0]
-
-        # Check single-file skills downloaded
-        python_skill = skills_dir / "python.md"
-        assert python_skill.exists()
-        assert python_skill.read_text() == "# Sample Skill Content"
+    assert skills_dir.exists()
+    assert sentinel.exists()
+    assert python_skill.exists()
+    assert python_skill.read_text() == "# Python Skill Guidelines"
 
 
 # =====================================================================

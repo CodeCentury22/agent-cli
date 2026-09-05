@@ -63,19 +63,21 @@ def test_setup_provider_and_auth_claude_new_key(mock_ask, mock_get_cred, mock_sa
 # 3. REPL MAIN LOOP TESTS
 # ==========================================
 
+@patch("agent_cli.main.ensure_preset_skills_exist")
 @patch("agent_cli.main.ensure_agent_gitignore_entries")
 @patch("agent_cli.main.setup_provider_and_auth")
 @patch("agent_cli.main.create_llm_client")
 @patch("agent_cli.main.VectorStoreManager")
 @patch("agent_cli.main.run_agent_turn", new_callable=AsyncMock)
-@patch("rich.prompt.Prompt.ask")
+@patch("agent_cli.main.prompt")  # Updated to intercept prompt_toolkit.prompt
 def test_main_repl_loop_execution(
     mock_prompt,
     mock_run_turn,
     mock_vector_class,
     mock_create_llm,
     mock_setup,
-    mock_gitignore
+    mock_gitignore,
+    mock_preset_skills
 ):
     # 1. Setup mock provider configuration
     mock_setup.return_value = ("ollama", "qwen2.5-coder:7b-instruct", None)
@@ -95,5 +97,6 @@ def test_main_repl_loop_execution(
 
     # Assertions
     mock_gitignore.assert_called_once()
+    mock_preset_skills.assert_called_once()
     mock_setup.assert_called_once()
     mock_run_turn.assert_called_once_with("How does this work?", mock_llm_instance, mock_vector_instance)
