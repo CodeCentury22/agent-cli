@@ -1,4 +1,5 @@
 import os
+import re
 import subprocess
 import httpx
 from rich.console import Console
@@ -48,7 +49,6 @@ def detect_project_platforms() -> list[str]:
 
     # Java
     if os.path.exists(os.path.join(cwd, "pom.xml")) or os.path.exists(os.path.join(cwd, "build.gradle")):
-        # Only classify as general java if not specifically Android
         if not os.path.exists(os.path.join(cwd, "app", "build.gradle")):
             detected.append("java")
 
@@ -83,8 +83,46 @@ def detect_project_platforms() -> list[str]:
     return list(set(detected))
 
 
+def sanitize_skill_prompt(prompt_text: str) -> str:
+    """
+    Strips out lines containing MCP commands, get_best_practices, or invalid CLI flags.
+    """
+    lines = prompt_text.splitlines()
+    cleaned_lines = []
+    
+    # Regex patterns for MCP references or invalid flags
+    forbidden_pattern = re.compile(
+        r"(\bmcp\b|ng\s+mcp|get_best_practices|--interactive=false)", 
+        re.IGNORECASE
+    )
+
+    for line in lines:
+        if not forbidden_pattern.search(line):
+            cleaned_lines.append(line)
+
+    return "\n".join(cleaned_lines)
+
+
+def sanitize_directory_skills(directory: str):
+    """Recursively walks a skill directory and sanitizes all markdown prompt files."""
+    for root, _, files in os.walk(directory):
+        for file in files:
+            if file.endswith((".md", ".mdc", ".txt")):
+                file_path = os.path.join(root, file)
+                try:
+                    with open(file_path, "r", encoding="utf-8") as f:
+                        content = f.read()
+                    
+                    sanitized_content = sanitize_skill_prompt(content)
+                    
+                    with open(file_path, "w", encoding="utf-8") as f:
+                        f.write(sanitized_content)
+                except Exception as e:
+                    console.print(f"[yellow]Warning: Failed to sanitize skill file '{file_path}': {e}[/yellow]")
+
+
 def ensure_preset_skills_exist():
-    """Detects workspace stack and downloads matching platform skills ONCE."""
+    """Detects workspace stack, downloads matching platform skills ONCE, and sanitizes them."""
     skills_dir = os.path.join(os.getcwd(), ".agent", "skills")
     sentinel_file = os.path.join(skills_dir, ".preset_installed")
 
@@ -118,8 +156,9 @@ def ensure_preset_skills_exist():
                     with httpx.Client(follow_redirects=True, timeout=10.0) as client:
                         res = client.get(url)
                         if res.status_code == 200:
+                            sanitized = sanitize_skill_prompt(res.text.strip())
                             with open(file_path, "w", encoding="utf-8") as f:
-                                f.write(res.text.strip())
+                                f.write(sanitized)
                         else:
                             console.print(f"[yellow]Warning: Skill download for '{platform}' returned HTTP {res.status_code}[/yellow]")
                 except Exception as e:
@@ -127,10 +166,11 @@ def ensure_preset_skills_exist():
         else:
             console.print(f"[dim]Note: Platform '{platform}' detected, but no matching preset skill URL configured.[/dim]")
 
+    # Run sanitization across all downloaded skills (including git-cloned skills)
+    sanitize_directory_skills(skills_dir)
+
     try:
         with open(sentinel_file, "w", encoding="utf-8") as f:
             f.write("installed")
     except Exception:
         pass
-
-    
