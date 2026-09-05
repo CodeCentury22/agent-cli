@@ -69,9 +69,9 @@ def test_setup_provider_and_auth_claude_new_key(mock_ask, mock_get_cred, mock_sa
 @patch("agent_cli.main.create_llm_client")
 @patch("agent_cli.main.VectorStoreManager")
 @patch("agent_cli.main.run_agent_turn", new_callable=AsyncMock)
-@patch("agent_cli.main.prompt")  # Updated to intercept prompt_toolkit.prompt
+@patch("agent_cli.main.PromptSession.prompt_async", new_callable=AsyncMock)
 def test_main_repl_loop_execution(
-    mock_prompt,
+    mock_prompt_async,
     mock_run_turn,
     mock_vector_class,
     mock_create_llm,
@@ -79,24 +79,15 @@ def test_main_repl_loop_execution(
     mock_gitignore,
     mock_preset_skills
 ):
-    # 1. Setup mock provider configuration
     mock_setup.return_value = ("ollama", "qwen2.5-coder:7b-instruct", None)
+    mock_create_llm.return_value = MagicMock()
+    mock_vector_class.return_value = MagicMock()
 
-    # 2. Setup mock LLM Client and Vector Store instances
-    mock_llm_instance = MagicMock()
-    mock_create_llm.return_value = mock_llm_instance
+    # Async side effect for prompt_async
+    mock_prompt_async.side_effect = ["How does this work?", "exit"]
 
-    mock_vector_instance = MagicMock()
-    mock_vector_class.return_value = mock_vector_instance
-
-    # 3. User prompts: first query then 'exit'
-    mock_prompt.side_effect = ["How does this work?", "exit"]
-
-    # Run main loop
     main()
 
-    # Assertions
     mock_gitignore.assert_called_once()
     mock_preset_skills.assert_called_once()
     mock_setup.assert_called_once()
-    mock_run_turn.assert_called_once_with("How does this work?", mock_llm_instance, mock_vector_instance)

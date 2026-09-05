@@ -4,7 +4,7 @@ import asyncio
 import importlib.metadata
 from rich.console import Console
 from rich.panel import Panel
-from prompt_toolkit import prompt
+from prompt_toolkit import PromptSession
 from prompt_toolkit.styles import Style
 from prompt_toolkit.formatted_text import HTML
 
@@ -70,16 +70,17 @@ async def async_main():
         title="Agent Environment"
     ))
 
-    # Configure prompt_toolkit styling
+    # Configure prompt_toolkit style and async PromptSession
     prompt_style = Style.from_dict({
         'prompt': 'ansigreen bold',
     })
+    session = PromptSession(style=prompt_style)
 
     while True:
         try:
-            # Using HTML formatting compatible with prompt_toolkit
-            console.print()  # Add newline before prompt
-            user_input = prompt(HTML('<prompt>agent&gt; </prompt>'), style=prompt_style).strip()
+            console.print()  # Add spacing before prompt
+            # Use await session.prompt_async(...) inside active asyncio loop
+            user_input = (await session.prompt_async(HTML('<prompt>agent&gt; </prompt>'))).strip()
             
             if not user_input:
                 continue
