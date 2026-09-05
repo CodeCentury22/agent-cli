@@ -60,7 +60,7 @@ async def async_main():
         vector_store = VectorStoreManager(llm_client=llm_client)
         
         # Index workspace files into vector memory
-        with console.status("[bold cyan]Indexing workspace into vector memory...[/bold cyan]"):
+        with console.status("[bold cyan]Indexing workspace...[/bold cyan]"):
             if asyncio.iscoroutinefunction(getattr(vector_store, "index_workspace", None)):
                 await vector_store.index_workspace()
             else:
