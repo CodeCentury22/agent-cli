@@ -1,3 +1,4 @@
+import json
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
 
@@ -5,6 +6,7 @@ from agent_cli.auth import get_stored_credentials, save_credentials
 from agent_cli.agent_config import setup_provider_and_auth
 from agent_cli.main import main
 from agent_cli.agent_workspace import initialize_workspace_vector_memory
+from agent_cli.agent_orchestrator import run_agent_turn, parse_tool_call
 
 # ==========================================
 # 1. AUTH & CREDENTIAL STORAGE TESTS
@@ -120,3 +122,49 @@ def test_main_repl_loop_execution(
     mock_setup.assert_called_once()
     mock_init_vector_memory.assert_called_once_with(mock_vector_instance, ".")
     mock_run_turn.assert_called_once_with("How does this work?", mock_llm_instance, mock_vector_instance)
+
+
+# ==========================================
+# 5. ORCHESTRATOR & CIRCUIT BREAKER TESTS
+# ==========================================
+
+def test_parse_tool_call_valid_json_string():
+    response_str = '{"tool_name": "run_shell_command", "arguments": {"command": "ls"}}'
+    tool_name, args = parse_tool_call(response_str)
+    assert tool_name == "run_shell_command"
+    assert args == {"command": "ls"}
+
+
+def test_parse_tool_call_sdk_object():
+    mock_obj = MagicMock()
+    mock_obj.tool_calls = [{"name": "read_file", "arguments": {"file_path": "src/main.ts"}}]
+    tool_name, args = parse_tool_call(mock_obj)
+    assert tool_name == "read_file"
+    assert args == {"file_path": "src/main.ts"}
+
+
+@pytest.mark.asyncio
+@patch("agent_cli.agent_orchestrator.handle_tool_call", new_callable=AsyncMock)
+async def test_run_agent_turn_sliding_window_circuit_breaker(mock_handle_tool):
+    """Verify circuit breaker catches alternating duplicate tool calls across turns."""
+    mock_llm_client = AsyncMock()
+    mock_vector_store = MagicMock()
+    mock_vector_store.search_codebase.return_value = []
+
+    # Sequence: cmd_a -> cmd_b -> cmd_a -> cmd_a (or breaker check)
+    cmd_a = '{"tool_name": "run_shell_command", "arguments": {"command": "which ng"}}'
+    cmd_b = '{"tool_name": "run_shell_command", "arguments": {"command": "ng version"}}'
+    
+    mock_llm_client.chat.side_effect = [
+        (cmd_a, {"input_tokens": 10, "output_tokens": 5}),  # Turn 1: cmd_a executed (count: 1)
+        (cmd_b, {"input_tokens": 10, "output_tokens": 5}),  # Turn 2: cmd_b executed (count: 1)
+        (cmd_a, {"input_tokens": 10, "output_tokens": 5}),  # Turn 3: cmd_a executed (count: 2)
+        (cmd_a, {"input_tokens": 10, "output_tokens": 5}),  # Turn 4: chat called, circuit breaker sees count >= 2 and breaks!
+    ]
+    
+    mock_handle_tool.return_value = "Command output ok"
+
+    await run_agent_turn("Check ng environment", mock_llm_client, mock_vector_store)
+
+    # Tool execution count should be 3 (cmd_a, cmd_b, cmd_a) before Turn 4 halts before calling handle_tool_call
+    assert mock_handle_tool.call_count == 3

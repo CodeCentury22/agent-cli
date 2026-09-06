@@ -58,7 +58,7 @@ async def run_agent_turn(user_input: str, llm_client: BaseLLMClient, vector_stor
         {"role": "user", "content": f"Context:\n{context_str}\n\nTask: {user_input}"}
     ]
 
-    last_tool_signature = None
+    recent_tool_signatures = []
 
     while True:
         # Prune old context messages to avoid token bloat during deep turns
@@ -71,17 +71,18 @@ async def run_agent_turn(user_input: str, llm_client: BaseLLMClient, vector_stor
         if tool_name and tool_name in ALL_TOOL_DISPATCHERS:
             tool_signature = (tool_name, json.dumps(raw_args, sort_keys=True))
             
-            # Circuit breaker
-            if tool_signature == last_tool_signature:
-                console.print(f"\n🛑 [Circuit Breaker]: Detected duplicate call to '{tool_name}'. Halting turn.")
+            # Sliding window circuit breaker (catches alternating loops like which ng -> ng version)
+            if recent_tool_signatures.count(tool_signature) >= 2:
+                console.print(f"\n🛑 [Circuit Breaker]: Detected repeating tool call loop for '{tool_name}'. Halting turn.")
                 messages.append({
                     "role": "user",
-                    "content": f"System Warning: Do not repeat failed command '{tool_name}' with identical arguments."
+                    "content": f"System Warning: Stop repeating command '{tool_name}'. Proceed to next task step or return status."
                 })
-                last_tool_signature = None
                 break
 
-            last_tool_signature = tool_signature
+            recent_tool_signatures.append(tool_signature)
+            if len(recent_tool_signatures) > 6:
+                recent_tool_signatures.pop(0)
 
             console.print(f"\n🛠️  [bold yellow]Agent Invoking Tool:[/bold yellow] [cyan]{tool_name}[/cyan]")
             
