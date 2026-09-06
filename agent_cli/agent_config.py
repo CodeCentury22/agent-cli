@@ -22,7 +22,11 @@ PROVIDERS = {
     "2": {
         "name": "gemini",
         "label": "Google Gemini",
-        "models": ["gemini-1.5-pro", "gemini-1.5-flash"]
+        "models": [
+            "gemini-2.5-flash",
+            "gemini-2.5-pro",
+            "gemini-3.7-flash"
+        ]
     },
     "3": {
         "name": "claude",
@@ -39,8 +43,6 @@ PROVIDERS = {
         ]
     }
 }
-
-
 def setup_provider_and_auth() -> Tuple[str, str, str | None]:
     """Interactive wizard for provider selection, model choice, and auth key handling."""
     console.print(Panel("[bold cyan]🤖 Agent CLI - Interactive Workspace Session[/bold cyan]", expand=False))

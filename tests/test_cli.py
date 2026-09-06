@@ -151,20 +151,20 @@ async def test_run_agent_turn_sliding_window_circuit_breaker(mock_handle_tool):
     mock_vector_store = MagicMock()
     mock_vector_store.search_codebase.return_value = []
 
-    # Sequence: cmd_a -> cmd_b -> cmd_a -> cmd_a (or breaker check)
+    # Sequence: cmd_a -> cmd_b -> cmd_a -> cmd_a (triggers circuit breaker on Turn 4)
     cmd_a = '{"tool_name": "run_shell_command", "arguments": {"command": "which ng"}}'
     cmd_b = '{"tool_name": "run_shell_command", "arguments": {"command": "ng version"}}'
     
     mock_llm_client.chat.side_effect = [
-        (cmd_a, {"input_tokens": 10, "output_tokens": 5}),  # Turn 1: cmd_a executed (count: 1)
-        (cmd_b, {"input_tokens": 10, "output_tokens": 5}),  # Turn 2: cmd_b executed (count: 1)
-        (cmd_a, {"input_tokens": 10, "output_tokens": 5}),  # Turn 3: cmd_a executed (count: 2)
-        (cmd_a, {"input_tokens": 10, "output_tokens": 5}),  # Turn 4: chat called, circuit breaker sees count >= 2 and breaks!
+        (cmd_a, {"input_tokens": 10, "output_tokens": 5}),  # Turn 1: cmd_a executed
+        (cmd_b, {"input_tokens": 10, "output_tokens": 5}),  # Turn 2: cmd_b executed
+        (cmd_a, {"input_tokens": 10, "output_tokens": 5}),  # Turn 3: cmd_a executed
+        (cmd_a, {"input_tokens": 10, "output_tokens": 5}),  # Turn 4: chat called, circuit breaker sees count >= 2 and halts turn
     ]
     
     mock_handle_tool.return_value = "Command output ok"
 
     await run_agent_turn("Check ng environment", mock_llm_client, mock_vector_store)
 
-    # Tool execution count should be 3 (cmd_a, cmd_b, cmd_a) before Turn 4 halts before calling handle_tool_call
+    # handle_tool_call should be invoked exactly 3 times before Turn 4 halts execution
     assert mock_handle_tool.call_count == 3
