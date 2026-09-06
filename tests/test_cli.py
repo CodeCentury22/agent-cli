@@ -125,11 +125,11 @@ def test_main_repl_loop_execution(
 
 
 # ==========================================
-# 5. ORCHESTRATOR & CIRCUIT BREAKER TESTS
+# 5. ORCHESTRATOR & PARSER TESTS
 # ==========================================
 
 def test_parse_tool_call_valid_json_string():
-    response_str = '{"tool_name": "run_shell_command", "arguments": {"command": "ls"}}'
+    response_str = '{"name": "run_shell_command", "arguments": {"command": "ls"}}'
     tool_name, args = parse_tool_call(response_str)
     assert tool_name == "run_shell_command"
     assert args == {"command": "ls"}
@@ -143,23 +143,59 @@ def test_parse_tool_call_sdk_object():
     assert args == {"file_path": "src/main.ts"}
 
 
+def test_parse_tool_call_markdown_code_block():
+    response_str = (
+        "Here is the tool call to update the file:\n\n"
+        "```json\n"
+        "{\n"
+        '  "name": "write_file",\n'
+        '  "arguments": {\n'
+        '    "file_path": "src/app/login.css",\n'
+        '    "code_body": ".card { color: blue; }"\n'
+        "  }\n"
+        "}\n"
+        "```"
+    )
+    tool_name, args = parse_tool_call(response_str)
+    assert tool_name == "write_file"
+    assert args == {
+        "file_path": "src/app/login.css",
+        "code_body": ".card { color: blue; }"
+    }
+
+
+def test_parse_tool_call_embedded_in_text():
+    response_str = (
+        "Writing styles now. "
+        '{"tool_name": "write_file", "arguments": {"path": "styles.css", "content": "body{}"}} '
+        "Done."
+    )
+    tool_name, args = parse_tool_call(response_str)
+    assert tool_name == "write_file"
+    assert args == {"path": "styles.css", "content": "body{}"}
+
+
 @pytest.mark.asyncio
+@patch("agent_cli.agent_orchestrator.validate_tool_args")
 @patch("agent_cli.agent_orchestrator.handle_tool_call", new_callable=AsyncMock)
-async def test_run_agent_turn_sliding_window_circuit_breaker(mock_handle_tool):
+async def test_run_agent_turn_sliding_window_circuit_breaker(mock_handle_tool, mock_validate):
     """Verify circuit breaker catches alternating duplicate tool calls across turns."""
     mock_llm_client = AsyncMock()
     mock_vector_store = MagicMock()
     mock_vector_store.search_codebase.return_value = []
 
+    # Mock validate_tool_args to return valid status and arguments directly
+    mock_validate.side_effect = lambda name, args: (True, args, "")
+
     # Sequence: cmd_a -> cmd_b -> cmd_a -> cmd_a (triggers circuit breaker on Turn 4)
-    cmd_a = '{"tool_name": "run_shell_command", "arguments": {"command": "which ng"}}'
-    cmd_b = '{"tool_name": "run_shell_command", "arguments": {"command": "ng version"}}'
+    cmd_a = '{"name": "run_shell_command", "arguments": {"command": "which ng"}}'
+    cmd_b = '{"name": "run_shell_command", "arguments": {"command": "ng version"}}'
     
     mock_llm_client.chat.side_effect = [
         (cmd_a, {"input_tokens": 10, "output_tokens": 5}),  # Turn 1: cmd_a executed
         (cmd_b, {"input_tokens": 10, "output_tokens": 5}),  # Turn 2: cmd_b executed
         (cmd_a, {"input_tokens": 10, "output_tokens": 5}),  # Turn 3: cmd_a executed
-        (cmd_a, {"input_tokens": 10, "output_tokens": 5}),  # Turn 4: chat called, circuit breaker sees count >= 2 and halts turn
+        (cmd_a, {"input_tokens": 10, "output_tokens": 5}),  # Turn 4: chat called, circuit breaker halts turn
     ]
     
     mock_handle_tool.return_value = "Command output ok"
