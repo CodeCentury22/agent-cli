@@ -11,7 +11,10 @@ from prompt_toolkit.formatted_text import HTML
 from agent_llm_client import create_llm_client, BaseLLMClient, OllamaClient
 from agent_vector_memory import VectorStoreManager
 
-from .agent_workspace import ensure_agent_gitignore_entries
+from .agent_workspace import (
+    ensure_agent_gitignore_entries,
+    initialize_workspace_vector_memory,
+)
 from .agent_config import setup_provider_and_auth
 from .agent_orchestrator import run_agent_turn
 from .skill_downloader import ensure_preset_skills_exist
@@ -21,7 +24,7 @@ console = Console()
 try:
     VERSION = f"v{importlib.metadata.version('agent-cli')}"
 except importlib.metadata.PackageNotFoundError:
-    VERSION = "v0.6.1"
+    VERSION = "v0.7.3"
 
 def display_welcome_banner():
     console.print(
@@ -59,12 +62,9 @@ async def async_main():
         
         vector_store = VectorStoreManager(llm_client=llm_client)
         
-        # Index workspace files into vector memory
-        with console.status("[bold cyan]Indexing workspace...[/bold cyan]"):
-            if asyncio.iscoroutinefunction(getattr(vector_store, "index_workspace", None)):
-                await vector_store.index_workspace()
-            else:
-                vector_store.index_workspace()
+        # Incremental Vector Memory Sync via git status & agent-async-runner
+        with console.status("[bold cyan]Syncing vector memory...[/bold cyan]"):
+            await initialize_workspace_vector_memory(vector_store, ".")
                 
     except Exception as e:
         console.print(f"[bold red]Initialization Error:[/bold red] {e}")
@@ -79,7 +79,6 @@ async def async_main():
         title="Agent Environment"
     ))
 
-    # Configure prompt_toolkit style and async PromptSession
     prompt_style = Style.from_dict({
         'prompt': 'ansigreen bold',
     })
@@ -87,8 +86,7 @@ async def async_main():
 
     while True:
         try:
-            console.print()  # Add spacing before prompt
-            # Use await session.prompt_async(...) inside active asyncio loop
+            console.print()
             user_input = (await session.prompt_async(HTML('<prompt>agent&gt; </prompt>'))).strip()
             
             if not user_input:

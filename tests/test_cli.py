@@ -4,6 +4,7 @@ from unittest.mock import patch, MagicMock, AsyncMock
 from agent_cli.auth import get_stored_credentials, save_credentials
 from agent_cli.agent_config import setup_provider_and_auth
 from agent_cli.main import main
+from agent_cli.agent_workspace import initialize_workspace_vector_memory
 
 # ==========================================
 # 1. AUTH & CREDENTIAL STORAGE TESTS
@@ -31,7 +32,6 @@ def test_save_and_get_credentials(tmp_path, monkeypatch):
 @patch("agent_cli.agent_config.get_stored_credentials")
 @patch("rich.prompt.Prompt.ask")
 def test_setup_provider_and_auth_ollama(mock_ask, mock_get_credentials):
-    # Mock user choosing provider '1' (Ollama) and model '1'
     mock_ask.side_effect = ["1", "1"]
 
     provider, model, api_key = setup_provider_and_auth()
@@ -46,9 +46,7 @@ def test_setup_provider_and_auth_ollama(mock_ask, mock_get_credentials):
 @patch("agent_cli.agent_config.get_stored_credentials")
 @patch("rich.prompt.Prompt.ask")
 def test_setup_provider_and_auth_claude_new_key(mock_ask, mock_get_cred, mock_save_cred):
-    # Mock no stored credentials found
     mock_get_cred.return_value = None
-    # User inputs: provider '3' (Claude), model '1', API key "sk-test"
     mock_ask.side_effect = ["3", "1", "sk-test"]
 
     provider, model, api_key = setup_provider_and_auth()
@@ -60,9 +58,33 @@ def test_setup_provider_and_auth_claude_new_key(mock_ask, mock_get_cred, mock_sa
 
 
 # ==========================================
-# 3. REPL MAIN LOOP TESTS
+# 3. WORKSPACE VECTOR MEMORY TESTS
 # ==========================================
 
+@pytest.mark.asyncio
+@patch("agent_cli.agent_workspace.sync_workspace_vector_memory")
+@patch("agent_cli.agent_workspace.get_git_status_changes", new_callable=AsyncMock)
+async def test_initialize_workspace_vector_memory_sync(mock_git_status, mock_sync_memory, tmp_path):
+    mock_vector_store = MagicMock()
+    mock_git_status.return_value = (True, {"src/app.ts"}, {"src/old.ts"})
+
+    await initialize_workspace_vector_memory(mock_vector_store, str(tmp_path))
+
+    mock_git_status.assert_called_once_with(str(tmp_path.resolve()))
+    mock_sync_memory.assert_called_once_with(
+        vector_store=mock_vector_store,
+        workspace_dir=str(tmp_path.resolve()),
+        is_git_repo=True,
+        files_to_update={"src/app.ts"},
+        files_to_delete={"src/old.ts"}
+    )
+
+
+# ==========================================
+# 4. REPL MAIN LOOP TESTS
+# ==========================================
+
+@patch("agent_cli.main.initialize_workspace_vector_memory", new_callable=AsyncMock)
 @patch("agent_cli.main.ensure_preset_skills_exist")
 @patch("agent_cli.main.ensure_agent_gitignore_entries")
 @patch("agent_cli.main.setup_provider_and_auth")
@@ -77,13 +99,18 @@ def test_main_repl_loop_execution(
     mock_create_llm,
     mock_setup,
     mock_gitignore,
-    mock_preset_skills
+    mock_preset_skills,
+    mock_init_vector_memory
 ):
     mock_setup.return_value = ("ollama", "qwen2.5-coder:7b-instruct", None)
-    mock_create_llm.return_value = MagicMock()
-    mock_vector_class.return_value = MagicMock()
+    
+    mock_llm_instance = AsyncMock()
+    mock_llm_instance.ensure_model_available.return_value = True
+    mock_create_llm.return_value = mock_llm_instance
+    
+    mock_vector_instance = MagicMock()
+    mock_vector_class.return_value = mock_vector_instance
 
-    # Async side effect for prompt_async
     mock_prompt_async.side_effect = ["How does this work?", "exit"]
 
     main()
@@ -91,3 +118,5 @@ def test_main_repl_loop_execution(
     mock_gitignore.assert_called_once()
     mock_preset_skills.assert_called_once()
     mock_setup.assert_called_once()
+    mock_init_vector_memory.assert_called_once_with(mock_vector_instance, ".")
+    mock_run_turn.assert_called_once_with("How does this work?", mock_llm_instance, mock_vector_instance)

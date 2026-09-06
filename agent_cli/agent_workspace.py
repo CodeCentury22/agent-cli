@@ -2,6 +2,11 @@ import os
 import glob
 import subprocess
 from rich.console import Console
+
+from agent_async_runner import get_git_status_changes
+from agent_vector_memory.sync import sync_workspace_vector_memory
+from agent_vector_memory.store import VectorStoreManager
+
 from .skill_downloader import ensure_preset_skills_exist
 
 console = Console()
@@ -19,6 +24,30 @@ AGENT_IGNORES = [
     ".codebase_summary.xml",
     "agent_manifest.json"
 ]
+
+
+async def initialize_workspace_vector_memory(
+    vector_store: VectorStoreManager, 
+    workspace_dir: str = "."
+) -> None:
+    """
+    Retrieves uncommitted git changes via agent-async-runner and synchronizes
+    the vector memory store incrementally.
+    """
+    abs_workspace = os.path.abspath(workspace_dir)
+
+    # 1. Fetch changed/deleted files using agent-async-runner helper
+    is_git_repo, files_to_update, files_to_delete = await get_git_status_changes(abs_workspace)
+
+    # 2. Perform incremental vector store sync
+    sync_workspace_vector_memory(
+        vector_store=vector_store,
+        workspace_dir=abs_workspace,
+        is_git_repo=is_git_repo,
+        files_to_update=files_to_update,
+        files_to_delete=files_to_delete,
+    )
+
 
 def ensure_agent_gitignore_entries():
     """Ensures agent runtime files are in .gitignore and commits changes if updated."""
