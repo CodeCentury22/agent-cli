@@ -123,6 +123,9 @@ def parse_tool_call(response_obj) -> tuple[str | None, dict]:
 
 async def run_agent_turn(user_input: str, llm_client: BaseLLMClient, vector_store: VectorStoreManager):
     """Executes a complete single-user-request turn with multi-turn tool calling and guardrails."""
+    synced = vector_store.sync_git_changes(root_dir=".")
+    if synced > 0:
+        console.print(f"[dim]🧠 [Vector Memory]: Synced {synced} modified file(s) into Chroma.[/dim]")
     context_matches = vector_store.search_codebase(user_input, top_k=3)
     context_str = "\n".join([f"File: {m['file_path']}\nContent: {m['content']}" for m in context_matches])
 
@@ -231,3 +234,5 @@ async def run_agent_turn(user_input: str, llm_client: BaseLLMClient, vector_stor
         console.print(f"\n🤖 [bold cyan]Agent Response:[/bold cyan]\n{response_obj}")
         console.print(f"\n[dim]Metrics: {metrics}[/dim]")
         break
+
+    
