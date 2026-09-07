@@ -5,7 +5,10 @@ from unittest.mock import patch, MagicMock, AsyncMock
 from agent_cli.auth import get_stored_credentials, save_credentials
 from agent_cli.agent_config import setup_provider_and_auth
 from agent_cli.main import main
-from agent_cli.mcp_manager import ensure_and_load_mcp_servers
+from agent_cli.mcp_manager import (
+    ensure_and_load_mcp_servers,
+    get_mcp_tool_schemas_and_dispatchers,
+)
 from agent_cli.agent_workspace import initialize_workspace_vector_memory
 from agent_cli.agent_orchestrator import run_agent_turn, parse_tool_call
 
@@ -65,6 +68,17 @@ def test_ensure_and_load_mcp_servers_parses_configured_servers(tmp_path, monkeyp
         assert "git" in active_servers
         assert "// comment" not in active_servers
         mock_guidance.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_get_mcp_tool_schemas_and_dispatchers_empty(tmp_path, monkeypatch):
+    """Verify get_mcp_tool_schemas_and_dispatchers returns empty tuple when no servers active."""
+    monkeypatch.chdir(tmp_path)
+
+    with patch("agent_cli.mcp_manager.display_mcp_guidance"):
+        schemas, dispatchers = await get_mcp_tool_schemas_and_dispatchers()
+        assert schemas == []
+        assert dispatchers == {}
 
 
 # ==========================================
