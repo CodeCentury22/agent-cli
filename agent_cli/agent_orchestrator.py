@@ -15,6 +15,48 @@ ALL_TOOL_DISPATCHERS = {**TOOL_DISPATCHER, **ASYNC_TOOL_DISPATCHER}
 
 console = Console()
 
+README_CANDIDATES = [
+    "README.md",
+    "README.txt",
+    "README",
+    "readme.md",
+    "docs/README.md",
+]
+
+
+def sanitize_readme_for_llm(readme_text: str, max_chars: int = 3500) -> str:
+    """Strips visual noise, HTML comments, and marketing images from README prior to prompt injection."""
+    if not readme_text:
+        return ""
+
+    # 1. Strip Markdown images and HTML badges
+    text = re.sub(r"!\[.*?\]\(.*?\)", "", readme_text)
+    text = re.sub(r"<img.*?>", "", text, flags=re.IGNORECASE)
+
+    # 2. Strip HTML comments
+    text = re.sub(r"<!--.*?-->", "", text, flags=re.DOTALL)
+
+    # 3. Truncate excess length while preserving operational sections
+    if len(text) > max_chars:
+        text = text[:max_chars] + "\n\n...[README truncated for context efficiency]..."
+
+    return text.strip()
+
+
+def read_workspace_readme(workspace_dir: str = ".") -> str:
+    """Locates, reads, and sanitizes the workspace README file."""
+    for candidate in README_CANDIDATES:
+        path = os.path.join(workspace_dir, candidate)
+        if os.path.exists(path) and os.path.isfile(path):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    content = f.read().strip()
+                    if content:
+                        return sanitize_readme_for_llm(content)
+            except Exception as e:
+                console.print(f"[dim]Warning: Failed to read {path}: {e}[/dim]")
+    return ""
+
 
 def load_workspace_config_context(workspace_dir: str = ".") -> str:
     """Reads project configuration files to ground the system prompt context."""
@@ -84,29 +126,41 @@ async def run_agent_turn(user_input: str, llm_client: BaseLLMClient, vector_stor
     """Executes a complete single-user-request turn with multi-turn tool calling and guardrails."""
     context_matches = vector_store.search_codebase(user_input, top_k=3)
     context_str = "\n".join([f"File: {m['file_path']}\nContent: {m['content']}" for m in context_matches])
-    
-    # Load dynamic skill files and project root configurations
+
+    # Load dynamic skills, project README documentation, and config manifests
     skills_context = load_project_skills()
+    readme_context = read_workspace_readme()
     config_context = load_workspace_config_context()
 
     system_prompt = (
         "You are an autonomous software engineering agent operating in a CLI workspace.\n\n"
+        "--- WORKSPACE CONTEXT & GUIDELINES ---\n"
+        f"<skills>\n{skills_context if skills_context else 'No custom skill guidelines provided.'}\n</skills>\n\n"
+        f"<readme_documentation>\n{readme_context if readme_context else 'No README file detected in workspace.'}\n</readme_documentation>\n\n"
+        f"<workspace_configurations>\n{config_context if config_context else 'No standard package manifests detected.'}\n</workspace_configurations>\n\n"
+        "--- CONTEXT PROCESSING & PRIORITIZATION RULES ---\n"
+        "1. SKILL GUIDELINES (HIGHEST PRIORITY):\n"
+        "   - Directives inside <skills> represent explicit project conventions (architecture, state management, testing patterns).\n"
+        "   - Always prioritize <skills> guidelines over generic default assumptions.\n\n"
+        "2. README OPERATIONAL METADATA EXTRACTOR:\n"
+        "   - Inspect <readme_documentation> exclusively for TECHNICAL OPERATIONAL PARAMETERS.\n"
+        "   - EXTRACT ONLY: Exact CLI commands (`pnpm run test`, `uv run pytest`), required package managers (`pnpm`, `uv`, `cargo`), "
+        "folder hierarchy layouts, and build prerequisites.\n"
+        "   - IGNORE ALL: Marketing text, project overviews, badges, contributor guides, and license blocks.\n"
+        "   - FALLBACK: If <readme_documentation> is missing, minimal, or lacks scripts, infer tools directly from <workspace_configurations> instead of guessing.\n\n"
         "VECTOR CONTEXT & FILE DISCOVERY RULES:\n"
-        "1. You MUST strictly rely on the provided Chroma vector search results injected into your context to locate files and understand project components.\n"
+        "1. Strictly rely on provided Chroma vector search results injected into your user prompt to locate files and understand project components.\n"
         "2. DO NOT execute terminal shell commands (e.g., `find`, `grep`, `locate`, `ls -R`) to discover or search for files.\n"
-        "3. BEFORE modifying or creating any files, verify that the target component exists within the provided vector results or project configurations. "
-        "If the required file or component is NOT present in the vector context, TERMINATE the session immediately and inform the user.\n"
-        "4. DO NOT create duplicate folders or component scaffolding if the vector context yields no exact match.\n\n"
+        "3. BEFORE modifying or creating any files, verify target component existence within vector context or workspace manifests. "
+        "If required files/components are NOT present in vector context, TERMINATE session immediately and inform user.\n"
+        "4. DO NOT create duplicate folders or component scaffolding if vector context yields no exact match.\n\n"
         "COMMAND EXECUTION & SAFETY RULES:\n"
         "1. NEVER execute interactive daemons or MCP servers in foreground turns (e.g., `ng mcp`, `ng serve`). "
         "Only run non-blocking CLI commands, or spawn background jobs for builds/tests using `start_background_task` and inspect them using `get_background_task_status`.\n"
-        "2. Always inspect configuration files (e.g., `package.json`, build configs) before executing shell commands.\n"
-        "3. Determine project platform and adhere strictly to matching guidelines in injected PROJECT SKILLS & DOMAIN GUIDELINES.\n"
-        "4. When calling tools, output valid JSON strictly matching the schema:\n"
+        "2. Always inspect package manifests (`package.json`, `pyproject.toml`) before running shell commands.\n"
+        "3. Output valid JSON strictly matching tool schema:\n"
         '   {"name": "tool_name", "arguments": {"arg": "value"}}\n'
-        "5. If a tool command or build fails, DO NOT repeat identical arguments. Read error output, inspect files, or adjust flags.\n\n"
-        f"WORKSPACE CONFIGURATIONS:\n{config_context}\n\n"
-        f"{skills_context}"
+        "4. If a tool command or build fails, DO NOT repeat identical arguments. Read error output, inspect files, or adjust flags."
     )
 
     messages = [
@@ -125,9 +179,9 @@ async def run_agent_turn(user_input: str, llm_client: BaseLLMClient, vector_stor
         tool_name, raw_args = parse_tool_call(response_obj)
 
         if tool_name and tool_name in ALL_TOOL_DISPATCHERS:
-            # Pre-validate arguments through Pydantic self-healing schemas (e.g. path -> file_path)
+            # Pre-validate arguments through Pydantic self-healing schemas
             is_valid, validated_args, err_msg = validate_tool_args(tool_name, raw_args)
-            
+
             if not is_valid:
                 console.print(f"\n⚠️ [Schema Validation Error]: {err_msg}. Triggering prompt repair...")
                 messages.append({"role": "assistant", "content": str(response_obj)})
@@ -138,8 +192,8 @@ async def run_agent_turn(user_input: str, llm_client: BaseLLMClient, vector_stor
                 continue
 
             tool_signature = (tool_name, json.dumps(validated_args, sort_keys=True))
-            
-            # Sliding window circuit breaker (catches alternating loops like which ng -> ng version)
+
+            # Sliding window circuit breaker
             if recent_tool_signatures.count(tool_signature) >= 2:
                 console.print(f"\n🛑 [Circuit Breaker]: Detected repeating tool call loop for '{tool_name}'. Halting turn.")
                 messages.append({
@@ -153,7 +207,7 @@ async def run_agent_turn(user_input: str, llm_client: BaseLLMClient, vector_stor
                 recent_tool_signatures.pop(0)
 
             console.print(f"\n🛠️  [bold yellow]Agent Invoking Tool:[/bold yellow] [cyan]{tool_name}[/cyan]")
-            
+
             tool_result = await handle_tool_call(tool_name, validated_args, ALL_TOOL_DISPATCHERS)
             console.print(f"📋 [bold green]Tool Execution Result:[/bold green]\n{tool_result}")
 

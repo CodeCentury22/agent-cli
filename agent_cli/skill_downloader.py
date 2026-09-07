@@ -1,5 +1,6 @@
 import os
-import re
+import json
+import glob
 import subprocess
 import httpx
 from rich.console import Console
@@ -20,6 +21,84 @@ PRESET_SKILLS = {
     "java": "https://raw.githubusercontent.com/PatrickJS/awesome-cursorrules/main/rules/java-springboot-jpa-cursorrules-prompt-file.mdc",
     "flutter": "https://raw.githubusercontent.com/PatrickJS/awesome-cursorrules/main/rules/flutter-development-guidelines-cursorrules-prompt-file.mdc",
 }
+
+LOCKFILE_CANDIDATES = [
+    "skill-lock.json",
+    "skills-lock.json",
+    "skills.json",
+    ".skills-lock.json",
+    "agent-skills.json",
+]
+
+
+def find_and_parse_skill_lock(cwd: str) -> dict[str, dict[str, str]]:
+    """
+    Scans the workspace for skill lockfiles and parses declared GitHub sources.
+    """
+    found_file = None
+
+    # 1. Check common exact filenames
+    for candidate in LOCKFILE_CANDIDATES:
+        path = os.path.join(cwd, candidate)
+        if os.path.exists(path):
+            found_file = path
+            break
+
+    # 2. Search for any JSON file matching *skill*lock*.json
+    if not found_file:
+        matches = glob.glob(os.path.join(cwd, "*skill*lock*.json"))
+        if matches:
+            found_file = matches[0]
+
+    if not found_file:
+        return {}
+
+    # 3. Parse JSON structure
+    declared_skills = {}
+    try:
+        with open(found_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        skills_dict = data.get("skills", data) if isinstance(data, dict) else {}
+
+        if isinstance(skills_dict, dict):
+            for name, details in skills_dict.items():
+                if isinstance(details, dict):
+                    source = details.get("source")
+                    source_type = details.get("sourceType", "github")
+                    skill_path = details.get("skillPath", "SKILL.md")
+
+                    if source_type == "github" and source:
+                        declared_skills[name] = {
+                            "raw_url": f"https://raw.githubusercontent.com/{source}/main/{skill_path}",
+                            "repo_url": f"https://github.com/{source}.git",
+                            "skill_path": skill_path,
+                            "lock_file": os.path.basename(found_file)
+                        }
+    except Exception as e:
+        console.print(f"[yellow]Warning: Could not parse lockfile '{found_file}': {e}[/yellow]")
+
+    return declared_skills
+
+
+def has_existing_workspace_skills(cwd: str) -> bool:
+    """Checks if the project is already equipped with skills in standard locations."""
+    skill_paths = [
+        os.path.join(cwd, ".agent", "skills"),
+        os.path.join(cwd, ".cursor", "rules"),
+        os.path.join(cwd, ".github", "copilot-instructions.md"),
+        os.path.join(cwd, "CLAUDE.md"),
+    ]
+    
+    for path in skill_paths:
+        if os.path.isfile(path):
+            return True
+        if os.path.isdir(path):
+            for root, _, files in os.walk(path):
+                if any(f.endswith((".md", ".mdc", ".txt")) for f in files):
+                    return True
+    return False
+
 
 def detect_project_platforms() -> list[str]:
     """Detects active frameworks/languages in the current workspace."""
@@ -83,57 +162,68 @@ def detect_project_platforms() -> list[str]:
     return list(set(detected))
 
 
-def sanitize_skill_prompt(prompt_text: str) -> str:
-    """
-    Strips out lines containing MCP commands, get_best_practices, or invalid CLI flags.
-    """
-    lines = prompt_text.splitlines()
-    cleaned_lines = []
-    
-    # Regex patterns for MCP references or invalid flags
-    forbidden_pattern = re.compile(
-        r"(\bmcp\b|ng\s+mcp|get_best_practices|--interactive=false)", 
-        re.IGNORECASE
-    )
-
-    for line in lines:
-        if not forbidden_pattern.search(line):
-            cleaned_lines.append(line)
-
-    return "\n".join(cleaned_lines)
-
-
-def sanitize_directory_skills(directory: str):
-    """Recursively walks a skill directory and sanitizes all markdown prompt files."""
-    for root, _, files in os.walk(directory):
-        for file in files:
-            if file.endswith((".md", ".mdc", ".txt")):
-                file_path = os.path.join(root, file)
-                try:
-                    with open(file_path, "r", encoding="utf-8") as f:
-                        content = f.read()
-                    
-                    sanitized_content = sanitize_skill_prompt(content)
-                    
-                    with open(file_path, "w", encoding="utf-8") as f:
-                        f.write(sanitized_content)
-                except Exception as e:
-                    console.print(f"[yellow]Warning: Failed to sanitize skill file '{file_path}': {e}[/yellow]")
-
-
 def ensure_preset_skills_exist():
-    """Detects workspace stack, downloads matching platform skills ONCE, and sanitizes them."""
-    skills_dir = os.path.join(os.getcwd(), ".agent", "skills")
+    """
+    Discovers skills using the following priority:
+    1. Skip if already initialized or existing workspace skills are present.
+    2. Parse and download locked skills from any discovered lockfile.
+    3. Fall back to auto-detecting project platform presets.
+    """
+    cwd = os.getcwd()
+    skills_dir = os.path.join(cwd, ".agent", "skills")
     sentinel_file = os.path.join(skills_dir, ".preset_installed")
 
     if os.path.exists(sentinel_file):
         return
 
+    if has_existing_workspace_skills(cwd):
+        console.print("💡 [Skill Loader]: Existing workspace skills detected. Skipping download.")
+        os.makedirs(skills_dir, exist_ok=True)
+        try:
+            with open(sentinel_file, "w", encoding="utf-8") as f:
+                f.write("equipped")
+        except Exception:
+            pass
+        return
+
+    os.makedirs(skills_dir, exist_ok=True)
+
+    # Priority 1: Check generic skill lockfiles
+    locked_skills = find_and_parse_skill_lock(cwd)
+    if locked_skills:
+        lock_filename = next(iter(locked_skills.values()))["lock_file"]
+        console.print(f"🔒 [Skill Downloader]: Found [cyan]{lock_filename}[/cyan]. Syncing {len(locked_skills)} locked skill(s)...")
+        
+        for name, meta in locked_skills.items():
+            target_file = os.path.join(skills_dir, f"{name}.md")
+            if not os.path.exists(target_file):
+                try:
+                    with httpx.Client(follow_redirects=True, timeout=10.0) as client:
+                        res = client.get(meta["raw_url"])
+                        if res.status_code == 200:
+                            with open(target_file, "w", encoding="utf-8") as f:
+                                f.write(res.text.strip())
+                        else:
+                            subprocess.run(
+                                ["git", "clone", "--depth", "1", meta["repo_url"], os.path.join(skills_dir, name)],
+                                check=True,
+                                capture_output=True
+                            )
+                except Exception as e:
+                    console.print(f"[yellow]Warning: Failed to fetch locked skill '{name}': {e}[/yellow]")
+
+        try:
+            with open(sentinel_file, "w", encoding="utf-8") as f:
+                f.write("lock_synced")
+        except Exception:
+            pass
+        return
+
+    # Priority 2: Fall back to workspace platform stack detection
     platforms = detect_project_platforms()
     if not platforms:
         return
 
-    os.makedirs(skills_dir, exist_ok=True)
     console.print(f"📥 [Skill Downloader]: Detected stack: [cyan]{', '.join(platforms)}[/cyan]. Downloading preset skills...")
 
     for platform in platforms:
@@ -156,18 +246,12 @@ def ensure_preset_skills_exist():
                     with httpx.Client(follow_redirects=True, timeout=10.0) as client:
                         res = client.get(url)
                         if res.status_code == 200:
-                            sanitized = sanitize_skill_prompt(res.text.strip())
                             with open(file_path, "w", encoding="utf-8") as f:
-                                f.write(sanitized)
+                                f.write(res.text.strip())
                         else:
                             console.print(f"[yellow]Warning: Skill download for '{platform}' returned HTTP {res.status_code}[/yellow]")
                 except Exception as e:
                     console.print(f"[yellow]Warning: Failed to download {platform} skill: {e}[/yellow]")
-        else:
-            console.print(f"[dim]Note: Platform '{platform}' detected, but no matching preset skill URL configured.[/dim]")
-
-    # Run sanitization across all downloaded skills (including git-cloned skills)
-    sanitize_directory_skills(skills_dir)
 
     try:
         with open(sentinel_file, "w", encoding="utf-8") as f:

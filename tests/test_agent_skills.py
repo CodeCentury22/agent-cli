@@ -1,10 +1,24 @@
+import os
+import json
 import pytest
 from unittest.mock import patch, MagicMock
-from agent_cli.skill_downloader import ensure_preset_skills_exist, PRESET_SKILLS
+from agent_cli.skill_downloader import (
+    ensure_preset_skills_exist,
+    find_and_parse_skill_lock,
+    has_existing_workspace_skills,
+)
 from agent_cli.agent_workspace import load_project_skills, ensure_agent_gitignore_entries
-from agent_cli.agent_orchestrator import parse_tool_call
+from agent_cli.agent_orchestrator import (
+    parse_tool_call,
+    sanitize_readme_for_llm,
+    read_workspace_readme,
+)
 from agent_cli.tool_handler import handle_tool_call
 
+
+# =====================================================================
+# Tests for tool_handler.py & Guardrails
+# =====================================================================
 
 @pytest.mark.asyncio
 async def test_handle_tool_call_successful_execution():
@@ -45,52 +59,79 @@ async def test_handle_tool_call_unregistered_tool():
 
 
 # =====================================================================
-# Tests for skill_downloader.py
+# Tests for skill_downloader.py (Lockfiles & Discovery)
 # =====================================================================
 
-def test_ensure_preset_skills_exist_bypasses_if_sentinel_exists(tmp_path):
-    """Verify that if .preset_installed exists, downloading is skipped completely."""
+def test_find_and_parse_skill_lock(tmp_path):
+    """Verify parsing of skill-lock.json structure."""
+    lock_data = {
+        "skills": {
+            "angular-developer": {
+                "source": "angular/skills",
+                "sourceType": "github",
+                "skillPath": "angular-developer/SKILL.md",
+            }
+        }
+    }
+    lock_file = tmp_path / "skill-lock.json"
+    lock_file.write_text(json.dumps(lock_data), encoding="utf-8")
+
+    parsed = find_and_parse_skill_lock(str(tmp_path))
+
+    assert "angular-developer" in parsed
+    assert parsed["angular-developer"]["raw_url"] == "https://raw.githubusercontent.com/angular/skills/main/angular-developer/SKILL.md"
+    assert parsed["angular-developer"]["lock_file"] == "skill-lock.json"
+
+
+def test_has_existing_workspace_skills(tmp_path):
+    """Verify detection of existing rules/skills in workspace."""
+    cursor_rules = tmp_path / ".cursor" / "rules"
+    cursor_rules.mkdir(parents=True, exist_ok=True)
+    (cursor_rules / "python.mdc").write_text("Rule content")
+
+    assert has_existing_workspace_skills(str(tmp_path)) is True
+
+
+def test_ensure_preset_skills_exist_skips_when_skills_exist(tmp_path, monkeypatch):
+    """Verify preset downloading is skipped if existing skills are discovered."""
+    monkeypatch.chdir(tmp_path)
     skills_dir = tmp_path / ".agent" / "skills"
     skills_dir.mkdir(parents=True, exist_ok=True)
-    sentinel = skills_dir / ".preset_installed"
-    sentinel.write_text("installed")
+    (skills_dir / "custom.md").write_text("# Custom Skill")
 
-    with patch("os.getcwd", return_value=str(tmp_path)), \
-         patch("subprocess.run") as mock_git, \
-         patch("httpx.Client") as mock_httpx:
-
+    with patch("httpx.Client") as mock_httpx, patch("subprocess.run") as mock_git:
         ensure_preset_skills_exist()
 
-        mock_git.assert_not_called()
         mock_httpx.assert_not_called()
+        mock_git.assert_not_called()
+        assert (skills_dir / ".preset_installed").exists()
 
 
-def test_ensure_preset_skills_exist_downloads_and_writes_sentinel(tmp_path, monkeypatch):
-    # Temporarily switch the working directory to the pytest tmp_path
+def test_ensure_preset_skills_exist_syncs_lockfile(tmp_path, monkeypatch):
+    """Verify downloading from lockfile takes priority over platform detection."""
     monkeypatch.chdir(tmp_path)
+    lock_data = {
+        "skills": {
+            "python-fastapi": {
+                "source": "PatrickJS/awesome-cursorrules",
+                "sourceType": "github",
+                "skillPath": "rules/python.mdc",
+            }
+        }
+    }
+    (tmp_path / "skills-lock.json").write_text(json.dumps(lock_data), encoding="utf-8")
 
-    # Mock stack detection to return at least one platform (e.g. ['python'])
-    with patch("agent_cli.skill_downloader.detect_project_platforms", return_value=["python"]), \
-         patch("httpx.Client.get") as mock_get:
-        
-        # Mock successful HTTP 200 response for preset skill fetch
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.text = "# Python Skill Guidelines"
-        mock_get.return_value = mock_response
+    with patch("httpx.Client.get") as mock_get:
+        mock_res = MagicMock()
+        mock_res.status_code = 200
+        mock_res.text = "# FastAPI Rules"
+        mock_get.return_value = mock_res
 
-        # Execute target function
         ensure_preset_skills_exist()
 
-    # Assertions on local tmp_path directory structure
-    skills_dir = tmp_path / ".agent" / "skills"
-    sentinel = skills_dir / ".preset_installed"
-    python_skill = skills_dir / "python.md"
-
-    assert skills_dir.exists()
-    assert sentinel.exists()
-    assert python_skill.exists()
-    assert python_skill.read_text() == "# Python Skill Guidelines"
+    target_skill = tmp_path / ".agent" / "skills" / "python-fastapi.md"
+    assert target_skill.exists()
+    assert target_skill.read_text() == "# FastAPI Rules"
 
 
 # =====================================================================
@@ -102,7 +143,6 @@ def test_load_project_skills_merges_markdown_and_ignores_dotfiles(tmp_path):
     skills_dir = tmp_path / ".agent" / "skills"
     skills_dir.mkdir(parents=True, exist_ok=True)
 
-    # Create dummy skill file and sentinel
     (skills_dir / "python.md").write_text("Python Best Practices")
     (skills_dir / ".preset_installed").write_text("installed")
 
@@ -137,8 +177,36 @@ def test_ensure_agent_gitignore_entries_appends_missing_patterns(tmp_path):
 
 
 # =====================================================================
-# Tests for agent_orchestrator.py
+# Tests for README Sanitization & Orchestrator Parsing
 # =====================================================================
+
+def test_sanitize_readme_for_llm():
+    """Verify images, badge links, and HTML comments are stripped from README."""
+    raw_readme = (
+        "# Project Title\n"
+        "![Banner](https://example.com/banner.png)\n"
+        "<!-- HTML Comment -->\n"
+        "<img src='badge.svg' />\n"
+        "## Setup\nUse `pnpm install`."
+    )
+    sanitized = sanitize_readme_for_llm(raw_readme)
+
+    assert "![Banner]" not in sanitized
+    assert "<!-- HTML Comment -->" not in sanitized
+    assert "<img" not in sanitized
+    assert "## Setup\nUse `pnpm install`." in sanitized
+
+
+def test_read_workspace_readme(tmp_path):
+    """Verify read_workspace_readme locates and sanitizes README.md."""
+    readme = tmp_path / "README.md"
+    readme.write_text("# Sample Project\nRun `npm test`.", encoding="utf-8")
+
+    result = read_workspace_readme(str(tmp_path))
+
+    assert "Sample Project" in result
+    assert "Run `npm test`." in result
+
 
 def test_parse_tool_call_object_format():
     """Verify parsing tool calls from SDK object responses."""
@@ -151,7 +219,7 @@ def test_parse_tool_call_object_format():
 
 
 def test_parse_tool_call_json_string_format():
-    """Verify parsing tool calls from raw JSON string responses (Ollama)."""
+    """Verify parsing tool calls from raw JSON string responses."""
     raw_json = '{"name": "read_file", "arguments": {"file_path": "package.json"}}'
 
     name, args = parse_tool_call(raw_json)

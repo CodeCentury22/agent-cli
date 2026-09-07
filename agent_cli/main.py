@@ -18,13 +18,15 @@ from .agent_workspace import (
 from .agent_config import setup_provider_and_auth
 from .agent_orchestrator import run_agent_turn
 from .skill_downloader import ensure_preset_skills_exist
+from .mcp_manager import ensure_and_load_mcp_servers
 
 console = Console()
 
 try:
     VERSION = f"v{importlib.metadata.version('agent-cli')}"
 except importlib.metadata.PackageNotFoundError:
-    VERSION = "v0.7.3"
+    VERSION = "v0.8.20"
+
 
 def display_welcome_banner():
     console.print(
@@ -35,12 +37,14 @@ def display_welcome_banner():
         )
     )
 
+
 async def async_main():
     display_welcome_banner()
     
-    # Ensure gitignore rules and workspace preset skills exist
+    # 1. Ensure gitignore rules, workspace preset skills, and MCP configurations exist
     ensure_agent_gitignore_entries()
     ensure_preset_skills_exist()
+    ensure_and_load_mcp_servers()
 
     try:
         provider, model, api_key = setup_provider_and_auth()
@@ -101,8 +105,10 @@ async def async_main():
             console.print("\n[yellow]Session interrupted. Goodbye![/yellow]")
             break
 
+
 def main():
     asyncio.run(async_main())
+
 
 if __name__ == "__main__":
     main()
