@@ -9,9 +9,7 @@ from agent_guardrails import validate_tool_args
 from agent_async_runner import SHELL_TOOLS_SCHEMA, ASYNC_TOOL_DISPATCHER
 from .tool_handler import handle_tool_call
 from .agent_workspace import load_project_skills
-
-ALL_TOOLS_SCHEMA = FILE_TOOLS_SCHEMA + SHELL_TOOLS_SCHEMA
-ALL_TOOL_DISPATCHERS = {**TOOL_DISPATCHER, **ASYNC_TOOL_DISPATCHER}
+from .mcp_manager import ensure_and_load_mcp_servers, get_mcp_tool_schemas_and_dispatchers
 
 console = Console()
 
@@ -127,6 +125,13 @@ async def run_agent_turn(user_input: str, llm_client: BaseLLMClient, vector_stor
     context_matches = vector_store.search_codebase(user_input, top_k=3)
     context_str = "\n".join([f"File: {m['file_path']}\nContent: {m['content']}" for m in context_matches])
 
+    # 1. Fetch dynamic MCP tool schemas & dispatchers if configured
+    mcp_schemas, mcp_dispatchers = await get_mcp_tool_schemas_and_dispatchers()
+
+    # 2. Combine native tools + active MCP tools into unified runtime objects
+    active_tools_schema = FILE_TOOLS_SCHEMA + SHELL_TOOLS_SCHEMA + mcp_schemas
+    active_tool_dispatchers = {**TOOL_DISPATCHER, **ASYNC_TOOL_DISPATCHER, **mcp_dispatchers}
+
     # Load dynamic skills, project README documentation, and config manifests
     skills_context = load_project_skills()
     readme_context = read_workspace_readme()
@@ -175,10 +180,11 @@ async def run_agent_turn(user_input: str, llm_client: BaseLLMClient, vector_stor
         if len(messages) > 12:
             messages = [messages[0], messages[1]] + messages[-8:]
 
-        response_obj, metrics = await llm_client.chat(messages, tools=ALL_TOOLS_SCHEMA)
+        # Send the unified active_tools_schema to the LLM client
+        response_obj, metrics = await llm_client.chat(messages, tools=active_tools_schema)
         tool_name, raw_args = parse_tool_call(response_obj)
 
-        if tool_name and tool_name in ALL_TOOL_DISPATCHERS:
+        if tool_name and tool_name in active_tool_dispatchers:
             # Pre-validate arguments through Pydantic self-healing schemas
             is_valid, validated_args, err_msg = validate_tool_args(tool_name, raw_args)
 
@@ -208,7 +214,8 @@ async def run_agent_turn(user_input: str, llm_client: BaseLLMClient, vector_stor
 
             console.print(f"\n🛠️  [bold yellow]Agent Invoking Tool:[/bold yellow] [cyan]{tool_name}[/cyan]")
 
-            tool_result = await handle_tool_call(tool_name, validated_args, ALL_TOOL_DISPATCHERS)
+            # Dispatch using unified active_tool_dispatchers
+            tool_result = await handle_tool_call(tool_name, validated_args, active_tool_dispatchers)
             console.print(f"📋 [bold green]Tool Execution Result:[/bold green]\n{tool_result}")
 
             messages.append({"role": "assistant", "content": json.dumps({"name": tool_name, "arguments": validated_args})})

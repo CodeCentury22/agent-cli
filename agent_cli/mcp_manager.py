@@ -76,3 +76,20 @@ def ensure_and_load_mcp_servers() -> dict:
         console.print(f"🔌 [MCP Manager]: Loaded [bold green]{len(active_servers)}[/bold green] configured MCP server(s).")
 
     return active_servers
+
+
+async def get_mcp_tool_schemas_and_dispatchers() -> tuple[list[dict], dict]:
+    """
+    Reads active MCP servers and returns their combined LLM tool schemas 
+    and dispatch handlers. Returns empty collections if no servers are active.
+    """
+    active_servers = ensure_and_load_mcp_servers()
+    if not active_servers:
+        return [], {}
+
+    mcp_schemas = []
+    mcp_dispatchers = {}
+
+    # Background client connection and tool schema discovery logic goes here
+
+    return mcp_schemas, mcp_dispatchers
