@@ -41,14 +41,12 @@ def display_mcp_guidance():
     )
 
 
+_mcp_guidance_displayed = False
+
 def ensure_and_load_mcp_servers() -> dict:
-    """
-    Ensures .agent/mcp.json exists. Retains all local skill files.
-    If no active servers are defined, displays guidance on every run.
-    """
+    global _mcp_guidance_displayed
     os.makedirs(AGENT_DIR, exist_ok=True)
 
-    # 1. Ensure boilerplate template exists
     if not os.path.exists(MCP_CONFIG_PATH):
         try:
             with open(MCP_CONFIG_PATH, "w", encoding="utf-8") as f:
@@ -56,7 +54,6 @@ def ensure_and_load_mcp_servers() -> dict:
         except Exception as e:
             console.print(f"⚠️ [MCP Manager]: Failed to write default config to {MCP_CONFIG_PATH}: {e}")
 
-    # 2. Parse active servers (skipping comment keys starting with '//')
     active_servers = {}
     if os.path.exists(MCP_CONFIG_PATH):
         try:
@@ -69,9 +66,10 @@ def ensure_and_load_mcp_servers() -> dict:
         except Exception as e:
             console.print(f"⚠️ [MCP Manager]: Error reading {MCP_CONFIG_PATH}: {e}")
 
-    # 3. Inform user without touching skill files
     if not active_servers:
-        display_mcp_guidance()
+        if not _mcp_guidance_displayed:
+            display_mcp_guidance()
+            _mcp_guidance_displayed = True
     else:
         console.print(f"🔌 [MCP Manager]: Loaded [bold green]{len(active_servers)}[/bold green] configured MCP server(s).")
 
