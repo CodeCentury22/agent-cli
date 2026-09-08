@@ -93,7 +93,7 @@ def test_setup_provider_and_auth_ollama(mock_ask, mock_get_credentials):
     provider, model, api_key = setup_provider_and_auth()
 
     assert provider == "ollama"
-    assert model == "qwen2.5-coder:7b-instruct"
+    assert model == "deepseek-r1:32b-qwen-distill-fp16"
     assert api_key is None
     mock_get_credentials.assert_not_called()
 
