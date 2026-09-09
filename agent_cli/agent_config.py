@@ -14,6 +14,7 @@ PROVIDERS = {
         "models": [
             "deepseek-r1:32b-qwen-distill-fp16",
             "deepseek-r1-agent:latest",
+            "codestral:latest",
             "qwen2.5-coder:7b-instruct",
             "qwen2.5-coder:32b-instruct",
             "deepseek-r1:32b",
