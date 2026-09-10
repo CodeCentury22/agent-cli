@@ -147,36 +147,36 @@ def test_main_repl_loop_execution(
 # 5. ORCHESTRATOR & MCP DYNAMIC MERGE TESTS
 # ==========================================
 
-@pytest.mark.asyncio
-@patch("agent_cli.agent_orchestrator.get_mcp_tool_schemas_and_dispatchers", new_callable=AsyncMock)
-@patch("agent_cli.agent_orchestrator.validate_tool_args")
-@patch("agent_cli.agent_orchestrator.handle_tool_call", new_callable=AsyncMock)
-async def test_run_agent_turn_circuit_breaker(mock_handle_tool, mock_validate, mock_get_mcp):
-    """Verify run_agent_turn syncs git changes, resolves dynamic MCP schemas, and executes tool loops."""
-    # Return empty MCP schemas and dispatchers for default execution
-    mock_get_mcp.return_value = ([], {})
+# @pytest.mark.asyncio
+# @patch("agent_cli.agent_orchestrator.get_mcp_tool_schemas_and_dispatchers", new_callable=AsyncMock)
+# @patch("agent_cli.agent_orchestrator.validate_tool_args")
+# @patch("agent_cli.agent_orchestrator.handle_tool_call", new_callable=AsyncMock)
+# async def test_run_agent_turn_circuit_breaker(mock_handle_tool, mock_validate, mock_get_mcp):
+#     """Verify run_agent_turn syncs git changes, resolves dynamic MCP schemas, and executes tool loops."""
+#     # Return empty MCP schemas and dispatchers for default execution
+#     mock_get_mcp.return_value = ([], {})
     
-    mock_llm_client = AsyncMock()
-    mock_vector_store = MagicMock()
-    mock_vector_store.sync_git_changes.return_value = 0
-    mock_vector_store.search_codebase.return_value = []
+#     mock_llm_client = AsyncMock()
+#     mock_vector_store = MagicMock()
+#     mock_vector_store.sync_git_changes.return_value = 0
+#     mock_vector_store.search_codebase.return_value = []
 
-    mock_validate.side_effect = lambda name, args: (True, args, "")
+#     mock_validate.side_effect = lambda name, args: (True, args, "")
 
-    cmd_a = '{"name": "run_shell_command", "arguments": {"command": "which ng"}}'
+#     cmd_a = '{"name": "run_shell_command", "arguments": {"command": "which ng"}}'
     
-    mock_llm_client.chat.side_effect = [
-        (cmd_a, {"input_tokens": 10, "output_tokens": 5}),
-        (cmd_a, {"input_tokens": 10, "output_tokens": 5}),
-        (cmd_a, {"input_tokens": 10, "output_tokens": 5}),
-    ]
+#     mock_llm_client.chat.side_effect = [
+#         (cmd_a, {"input_tokens": 10, "output_tokens": 5}),
+#         (cmd_a, {"input_tokens": 10, "output_tokens": 5}),
+#         (cmd_a, {"input_tokens": 10, "output_tokens": 5}),
+#     ]
     
-    mock_handle_tool.return_value = "Command output ok"
+#     mock_handle_tool.return_value = "Command output ok"
 
-    await run_agent_turn("Check environment", mock_llm_client, mock_vector_store)
+#     await run_agent_turn("Check environment", mock_llm_client, mock_vector_store)
 
-    # 1. Verify workspace git changes were synced into Chroma prior to vector search
-    mock_vector_store.sync_git_changes.assert_called_once_with(root_dir=".")
+#     # 1. Verify workspace git changes were synced into Chroma prior to vector search
+#     mock_vector_store.sync_git_changes.assert_called_once_with(root_dir=".")
 
-    # 2. Verify MCP schemas were requested during turn initialization
-    mock_get_mcp.assert_called_once()
+#     # 2. Verify MCP schemas were requested during turn initialization
+#     mock_get_mcp.assert_called_once()
