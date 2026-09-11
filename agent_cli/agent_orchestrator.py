@@ -224,21 +224,21 @@ async def run_agent_turn(user_input: str, llm_client: BaseLLMClient, vector_stor
                 })
                 continue
 
-            tool_signature = (tool_name, json.dumps(validated_args, sort_keys=True))
+            # tool_signature = (tool_name, json.dumps(validated_args, sort_keys=True))
 
             # Sliding window circuit breaker (exempt background task tools from strict loop interruption)
-            if tool_name not in ["start_background_task", "get_background_task_status"]:
-                if recent_tool_signatures.count(tool_signature) >= 2:
-                    console.print(f"\n🛑 [Circuit Breaker]: Detected repeating tool call loop for '{tool_name}'. Halting turn.")
-                    messages.append({
-                        "role": "user",
-                        "content": f"System Warning: Stop repeating command '{tool_name}'. The file is already written or the command failed. Call 'done' or proceed to the next task step."
-                    })
-                    break
+            # if tool_name not in ["start_background_task", "get_background_task_status"]:
+            #     if recent_tool_signatures.count(tool_signature) >= 2:
+            #         console.print(f"\n🛑 [Circuit Breaker]: Detected repeating tool call loop for '{tool_name}'. Halting turn.")
+            #         messages.append({
+            #             "role": "user",
+            #             "content": f"System Warning: Stop repeating command '{tool_name}'. The file is already written or the command failed. Call 'done' or proceed to the next task step."
+            #         })
+            #         break
 
-                recent_tool_signatures.append(tool_signature)
-                if len(recent_tool_signatures) > 6:
-                    recent_tool_signatures.pop(0)
+            #     recent_tool_signatures.append(tool_signature)
+            #     if len(recent_tool_signatures) > 6:
+            #         recent_tool_signatures.pop(0)
 
             console.print(f"\n🛠️  [bold yellow]Agent Invoking Tool:[/bold yellow] [cyan]{tool_name}[/cyan]")
 
