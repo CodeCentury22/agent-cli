@@ -132,8 +132,18 @@ async def run_agent_turn(user_input: str, llm_client: BaseLLMClient, vector_stor
     # 1. Fetch dynamic MCP tool schemas & dispatchers if configured
     mcp_schemas, mcp_dispatchers = await get_mcp_tool_schemas_and_dispatchers()
 
-    # 2. Combine native tools + active MCP tools into unified runtime objects
-    active_tools_schema = FILE_TOOLS_SCHEMA + SHELL_TOOLS_SCHEMA + mcp_schemas
+    # Define the explicit DONE tool
+    done_tool_schema = [{
+        "type": "function",
+        "function": {
+            "name": "done",
+            "description": "Call this tool with empty arguments when the task is fully complete and verified.",
+            "parameters": {"type": "object", "properties": {}}
+        }
+    }]
+
+    # 2. Combine native tools + active MCP tools + done tool into unified runtime objects
+    active_tools_schema = FILE_TOOLS_SCHEMA + SHELL_TOOLS_SCHEMA + mcp_schemas + done_tool_schema
     active_tool_dispatchers = {**TOOL_DISPATCHER, **ASYNC_TOOL_DISPATCHER, **mcp_dispatchers}
 
     # Load dynamic skills, project README documentation, and config manifests
@@ -148,7 +158,9 @@ async def run_agent_turn(user_input: str, llm_client: BaseLLMClient, vector_stor
         "2. DO NOT write out file contents, CSS code blocks, or explanations in your final text response when a tool is needed.\n"
         "3. To invoke a tool, your entire output must culminate in or consist strictly of a JSON object matching this schema:\n"
         '   {"name": "tool_name", "arguments": {"arg": "value"}}\n'
-        "4. Never output markdown code blocks containing code changes or file contents if a file-writing tool is available. Execute the tool instead.\n\n"
+        "4. When the overarching task is completely finished and verified, you MUST output:\n"
+        '   {"name": "done", "arguments": {}}\n'
+        "5. Never output markdown code blocks containing code changes or file contents if a file-writing tool is available. Execute the tool instead.\n\n"
         "--- WORKSPACE CONTEXT & GUIDELINES ---\n"
         f"<skills>\n{skills_context if skills_context else 'No custom skill guidelines provided.'}\n</skills>\n\n"
         f"<readme_documentation>\n{readme_context if readme_context else 'No README file detected in workspace.'}\n</readme_documentation>\n\n"
@@ -179,7 +191,6 @@ async def run_agent_turn(user_input: str, llm_client: BaseLLMClient, vector_stor
         "4. If a tool command or build fails, DO NOT repeat identical arguments. Read error output, inspect files, or adjust flags."
     )
 
-    
     messages = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": f"Context:\n{context_str}\n\nTask: {user_input}"}
@@ -196,6 +207,10 @@ async def run_agent_turn(user_input: str, llm_client: BaseLLMClient, vector_stor
         response_obj, metrics = await llm_client.chat(messages, tools=active_tools_schema)
         tool_name, raw_args = parse_tool_call(response_obj)
 
+        if tool_name == "done":
+            console.print(f"\n🎉 [bold green]Agent declared task complete![/bold green]")
+            break
+
         if tool_name and tool_name in active_tool_dispatchers:
             # Pre-validate arguments through Pydantic self-healing schemas
             is_valid, validated_args, err_msg = validate_tool_args(tool_name, raw_args)
@@ -209,21 +224,21 @@ async def run_agent_turn(user_input: str, llm_client: BaseLLMClient, vector_stor
                 })
                 continue
 
-            # tool_signature = (tool_name, json.dumps(validated_args, sort_keys=True))
+            tool_signature = (tool_name, json.dumps(validated_args, sort_keys=True))
 
             # Sliding window circuit breaker (exempt background task tools from strict loop interruption)
-            # if tool_name not in ["start_background_task", "get_background_task_status"]:
-            #     if recent_tool_signatures.count(tool_signature) >= 2:
-            #         console.print(f"\n🛑 [Circuit Breaker]: Detected repeating tool call loop for '{tool_name}'. Halting turn.")
-            #         messages.append({
-            #             "role": "user",
-            #             "content": f"System Warning: Stop repeating command '{tool_name}'. Proceed to next task step or return status."
-            #         })
-            #         break
+            if tool_name not in ["start_background_task", "get_background_task_status"]:
+                if recent_tool_signatures.count(tool_signature) >= 2:
+                    console.print(f"\n🛑 [Circuit Breaker]: Detected repeating tool call loop for '{tool_name}'. Halting turn.")
+                    messages.append({
+                        "role": "user",
+                        "content": f"System Warning: Stop repeating command '{tool_name}'. The file is already written or the command failed. Call 'done' or proceed to the next task step."
+                    })
+                    break
 
-            #     recent_tool_signatures.append(tool_signature)
-            #     if len(recent_tool_signatures) > 6:
-            #         recent_tool_signatures.pop(0)
+                recent_tool_signatures.append(tool_signature)
+                if len(recent_tool_signatures) > 6:
+                    recent_tool_signatures.pop(0)
 
             console.print(f"\n🛠️  [bold yellow]Agent Invoking Tool:[/bold yellow] [cyan]{tool_name}[/cyan]")
 
@@ -234,7 +249,7 @@ async def run_agent_turn(user_input: str, llm_client: BaseLLMClient, vector_stor
             messages.append({"role": "assistant", "content": json.dumps({"name": tool_name, "arguments": validated_args})})
             messages.append({
                 "role": "user",
-                "content": f"Tool '{tool_name}' Output:\n{tool_result}\n\nContinue with task or call next tool."
+                "content": f"Tool '{tool_name}' Output:\n{tool_result}\n\nContinue with task or call next tool. If finished, call 'done'."
             })
 
             console.print(f"[dim]Metrics: {metrics}[/dim]")
