@@ -191,12 +191,13 @@ async def run_agent_turn(user_input: str, llm_client: BaseLLMClient, vector_stor
         "4. If a tool command or build fails, DO NOT repeat identical arguments. Read error output, inspect files, or adjust flags."
     )
 
+
     messages = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": f"Context:\n{context_str}\n\nTask: {user_input}"}
     ]
 
-    recent_tool_signatures = []
+    # recent_tool_signatures = []
 
     while True:
         # Prune old context messages to avoid token bloat during deep turns
