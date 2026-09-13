@@ -3,7 +3,7 @@ import glob
 import subprocess
 from rich.console import Console
 
-from agent_async_runner import get_git_status_changes
+from agent_workspace_tools import get_git_status_changes
 from agent_vector_memory.sync import sync_workspace_vector_memory
 from agent_vector_memory.store import VectorStoreManager
 

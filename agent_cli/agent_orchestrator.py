@@ -4,8 +4,7 @@ import json
 from rich.console import Console
 from agent_llm_client import BaseLLMClient
 from agent_vector_memory import VectorStoreManager
-from agent_file_tools import FILE_TOOLS_SCHEMA, TOOL_DISPATCHER
-from agent_async_runner import SHELL_TOOLS_SCHEMA, ASYNC_TOOL_DISPATCHER
+from agent_workspace_tools import WORKSPACE_TOOLS_SCHEMA, WORKSPACE_TOOL_DISPATCHER
 from agent_guardrails import validate_tool_args
 from .tool_handler import handle_tool_call
 from .agent_workspace import load_project_skills
@@ -143,8 +142,8 @@ async def run_agent_turn(user_input: str, llm_client: BaseLLMClient, vector_stor
     }]
 
     # 2. Combine native tools + active MCP tools + done tool into unified runtime objects
-    active_tools_schema = FILE_TOOLS_SCHEMA + SHELL_TOOLS_SCHEMA + mcp_schemas + done_tool_schema
-    active_tool_dispatchers = {**TOOL_DISPATCHER, **ASYNC_TOOL_DISPATCHER, **mcp_dispatchers}
+    active_tools_schema = WORKSPACE_TOOLS_SCHEMA + mcp_schemas + done_tool_schema
+    active_tool_dispatchers = {**WORKSPACE_TOOL_DISPATCHER, **mcp_dispatchers}
 
     # Load dynamic skills, project README documentation, and config manifests
     skills_context = load_project_skills()
