@@ -105,7 +105,7 @@ def test_setup_provider_and_auth_ollama(mock_ask, mock_get_credentials):
 @patch("agent_cli.main.initialize_workspace_vector_memory", new_callable=AsyncMock)
 @patch("agent_cli.main.ensure_and_load_mcp_servers")
 @patch("agent_cli.main.ensure_preset_skills_exist")
-@patch("agent_cli.main.ensure_agent_gitignore_entries")
+@patch("agent_cli.main.ensure_agent_gitignore_entries", new_callable=AsyncMock)
 @patch("agent_cli.main.setup_provider_and_auth")
 @patch("agent_cli.main.create_llm_client")
 @patch("agent_cli.main.VectorStoreManager")

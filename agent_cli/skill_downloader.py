@@ -5,7 +5,21 @@ import subprocess
 import httpx
 from rich.console import Console
 
+from agent_workspace_tools import WORKSPACE_TOOL_DISPATCHER
+
 console = Console()
+
+
+def _workspace_write_file(path: str, content: str) -> None:
+    """Writes skill files exclusively through WORKSPACE_TOOL_DISPATCHER."""
+    writer = WORKSPACE_TOOL_DISPATCHER.get("write_file")
+    if writer is not None:
+        res = writer(file_path=path, code_body=content, overwrite=True)
+        if isinstance(res, dict) and res.get("status") not in ("SUCCESS", "NO_CHANGE"):
+            raise OSError(res.get("error", "workspace write_file failed"))
+    else:  # pragma: no cover - defensive fallback
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(content)
 
 PRESET_SKILLS = {
     "angular": "https://raw.githubusercontent.com/angular/skills/main/angular-developer/SKILL.md",
@@ -201,8 +215,7 @@ def ensure_preset_skills_exist():
                     with httpx.Client(follow_redirects=True, timeout=10.0) as client:
                         res = client.get(meta["raw_url"])
                         if res.status_code == 200:
-                            with open(target_file, "w", encoding="utf-8") as f:
-                                f.write(res.text.strip())
+                            _workspace_write_file(target_file, res.text.strip())
                         else:
                             subprocess.run(
                                 ["git", "clone", "--depth", "1", meta["repo_url"], os.path.join(skills_dir, name)],
@@ -246,8 +259,7 @@ def ensure_preset_skills_exist():
                     with httpx.Client(follow_redirects=True, timeout=10.0) as client:
                         res = client.get(url)
                         if res.status_code == 200:
-                            with open(file_path, "w", encoding="utf-8") as f:
-                                f.write(res.text.strip())
+                            _workspace_write_file(file_path, res.text.strip())
                         else:
                             console.print(f"[yellow]Warning: Skill download for '{platform}' returned HTTP {res.status_code}[/yellow]")
                 except Exception as e:

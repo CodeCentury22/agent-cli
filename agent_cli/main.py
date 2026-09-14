@@ -42,7 +42,7 @@ async def async_main():
     display_welcome_banner()
     
     # 1. Ensure gitignore rules, workspace preset skills, and MCP configurations exist
-    ensure_agent_gitignore_entries()
+    await ensure_agent_gitignore_entries()
     ensure_preset_skills_exist()
     ensure_and_load_mcp_servers()
 
@@ -66,7 +66,7 @@ async def async_main():
         
         vector_store = VectorStoreManager(llm_client=llm_client)
         
-        # Incremental Vector Memory Sync via git status & agent-async-runner
+        # Incremental Vector Memory Sync via agent-workspace-tools git status + sync
         with console.status("[bold cyan]Syncing vector memory...[/bold cyan]"):
             await initialize_workspace_vector_memory(vector_store, ".")
                 
